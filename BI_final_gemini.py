@@ -190,7 +190,6 @@ Showing empathy:
 
 INITIAL_ASSISTANT_MESSAGE = "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? For example, you might tell me who you’re caring for, your relationship to them, and what behavior or situation has been especially challenging recently. "
 
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
