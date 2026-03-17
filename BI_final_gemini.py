@@ -193,7 +193,7 @@ if "messages" not in st.session_state:
             content=INITIAL_ASSISTANT_MESSAGE,
             additional_kwargs={
                 "timestamp": current_timestamp(),
-                "model_name": "gemini-2.5-flash",
+                "model_name": "gemini-2.5-pro",
             },
         )
     )
@@ -224,7 +224,7 @@ if user_text:
         st.markdown(user_text)
 
     llm = ChatOpenAI(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-pro",
         api_key=os.getenv("GEMINI_API_KEY"),
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
@@ -238,7 +238,7 @@ if user_text:
         content=ai_msg.content,
         additional_kwargs={
             "timestamp": current_timestamp(),
-            "model_name": "gemini-2.5-flash",
+            "model_name": "gemini-2.5-pro",
         },
     )
     st.session_state.messages.append(assistant_msg)
