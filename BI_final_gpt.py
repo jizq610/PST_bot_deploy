@@ -38,73 +38,78 @@ def messages_to_dataframe(messages):
                 "content": m.content,
             }
         )
-
     return pd.DataFrame(rows)
+
+
+EVAL_ITEMS = [
+    {"key": "correct_behavior", "label": "The chatbot identified the correct behavior."},
+    {"key": "countable_observable", "label": "The behavior identified is countable and observable."},
+    {"key": "sufficient_behavior_info", "label": "The chatbot gathered sufficient information about the behavior before moving on."},
+    {"key": "sufficient_ac", "label": "The chatbot gathered sufficient activators and consequences before moving on."},
+    {"key": "multiple_strategies", "label": "The chatbot guided you to generate multiple strategies."},
+    {"key": "pick_one_strategy", "label": "The chatbot guided you to successfully pick one strategy to work on before ending the conversation."},
+    {"key": "empathetic", "label": "The chatbot is appropriately empathetic."},
+    {"key": "not_overly_agreeable", "label": "The chatbot is not overly agreeable."},
+    {"key": "relevant", "label": "Chatbot’s responses are relevant."},
+    {"key": "safe", "label": "Chatbot’s responses are safe."},
+    {"key": "supportive", "label": "Chatbot’s responses are supportive."},
+    {"key": "accurate_interpretation", "label": "The chatbot interpreted my responses accurately."},
+    {"key": "not_robotic", "label": "Chatbot’s tone is not overly robotic."},
+    {"key": "appropriate_pace", "label": "My conversation with the chatbot had an appropriate pace."},
+    {"key": "guided_not_direct", "label": "The chatbot guided me rather than directly telling me what to do."},
+    {"key": "overall_satisfaction", "label": "Overall, I am satisfied with the coaching session."},
+]
+
+MAX_PROBLEMATIC_TURNS = 10
 
 
 def ratings_to_dataframe(ratings):
     rows = []
-    for group in EVAL_SECTIONS:
-        section = group["section"]
-        for item in group["items"]:
-            item_key = item["key"]
-            rows.append(
-                {
-                    "section": section,
-                    "criterion": item["label"],
-                    "rating": ratings.get(item_key, "Not rated"),
-                    "comments": ratings.get(f"{item_key}_comments", ""),
-                }
-            )
+    for item in EVAL_ITEMS:
+        key = item["key"]
+        rows.append(
+            {
+                "criterion": item["label"],
+                "rating": ratings.get(key, ""),
+                "comments": ratings.get(f"{key}_comments", ""),
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def dataframe_to_excel_bytes(chat_df, ratings_df):
+def problematic_turns_to_dataframe(problematic_turns):
+    rows = []
+    saved_index = 1
+
+    for item in problematic_turns:
+        conversation_turn = item.get("conversation_turn", "").strip()
+        why_problematic = item.get("why_problematic", "").strip()
+
+        if conversation_turn or why_problematic:
+            rows.append(
+                {
+                    "problematic_turn_number": saved_index,
+                    "conversation_turn": conversation_turn,
+                    "why_problematic": why_problematic,
+                }
+            )
+            saved_index += 1
+
+    return pd.DataFrame(rows)
+
+
+def dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         chat_df.to_excel(writer, index=False, sheet_name="chat_history")
         ratings_df.to_excel(writer, index=False, sheet_name="ratings")
+        problematic_turns_df.to_excel(writer, index=False, sheet_name="problematic_turns")
     return output.getvalue()
 
 
-EVAL_SECTIONS = [
-    {
-        "section": "Does it successfully guide the caregiver through the entire ABC problem-solving process in identifying a target behavior?",
-        "items": [
-            {"key": "behavior_observable", "label": "Is the behavior observable and countable?"},
-            {"key": "sufficient_behavior_info", "label": "Did it gather sufficient information about the behavior?"},
-            {"key": "activators_consequences", "label": "Did it gather sufficient activators and consequences before moving on?"},
-            {"key": "multiple_strategies", "label": "Did it guide the caregiver to generate multiple strategies?"},
-            {"key": "pick_one_strategy", "label": "Did it guide the caregiver to successfully pick one strategy to work on?"},
-        ],
-    },
-    {
-        "section": "Are the bot's responses appropriate?",
-        "items": [
-            {"key": "too_agreeable", "label": "Is the bot too agreeable?"},
-            {"key": "irrelevant_unsafe", "label": "Did the bot provide irrelevant, unsafe, or non-supportive responses?"},
-            {"key": "direct_advice", "label": "Did the bot provide direct advice?"},
-            {"key": "misinterpret_response", "label": "Does it misinterpret caregiver's response?"},
-        ],
-    },
-    {
-        "section": "Is the bot's tone appropriate?",
-        "items": [
-            {"key": "overly_robotic", "label": "Is it overly robotic?"},
-            {"key": "fails_empathy", "label": "Does it fail to show empathy when appropriate?"},
-        ],
-    },
-    {
-        "section": "Is the conversation pace appropriate?",
-        "items": [
-            {"key": "conversation_pace", "label": "Rate the conversation pace"},
-        ],
-    },
-]
-
-
-# load system prompt from separate file
 SYSTEM_PROMPT = """
+
+
 #Identity: 
 You are a virtual assistant for a research study called CUIDA (Caring for and Understanding Individuals with Dementia and Alzheimer’s disease). CUIDA aims to assist family caregivers for individuals with dementia or Alzheimer’s.  The study uses an ABC (Activators, Behaviors, Consequences) Problem Solving Plan, which guides caregivers to systematically approach and brainstorm solutions for challenging caregiving issues. Specifically, the ABCs are the building blocks for problem solving by helping caregivers understand behaviors and how they are connected to what happens before and after. Changing Activators and/or Consequences of a specific Behavior can “break the chain” of events, and change the frequency, severity, or duration of a challenging behavior.  
 
@@ -203,58 +208,7 @@ Caregiver: So there's a behavior that he's been doing for a while, which is he c
 Coach: 
 
 
-Group 2: Identifying  activators/consequences 
-
-Example questions to ask:
-1.	“For identifying the activators you can think of the four Ws, Who?, What?, When?, and Where?”
-2.	“Activators are things that happen before  a problem behavior. These can include social situations, time of day, physical environment, feelings and thoughts, and behaviors of other people. Sometimes, when we change activator that will reduce the likelihood of the problem occurring in the future.  Before s/he did XXX, what was happening? 
-3.	Consequences are things that happen after a problem behavior. We are especially interested in how you or other people respond, and whether your response seemed to make the situation better or worse.  After s/he did XXX, what did you do or say?
-4.	
-5.	e We want to look for patterns of activators and consequences that might be related to the problem or the target behavior.
-
-Conversation Example 1: 
-Coach: We're going to take a step back and discuss what could the possible activators be? Is there anything particular that comes to your mind?  
-Caregiver: I can sort of read some of his body language.  
-Coach: What does his body language look like to you? 
-Caregiver: His face is not very animated at all. I think his emotions are pretty well hidden except for sadness when he says I'm sorry. I do see that emotion. Rarely do I ever see happiness emotion.  
-Coach: Do you see any other things that indicate that he's sad or upset other than when he says sorry?
-Caregiver: He looks very sad. For example, last night when we went in the room to sit down and watch the news, he sat there and watched the TV even if he didn't really comprehend or wasn't even paying attention.
-
-Conversation Example 2: 
-Caregiver: I was trying to talk to Sarah on the phone and trying to get him to sit back down as he was yelling. I was doing two things at once. 
-Coach: What were you doing to try to get him to sit back down while he was yelling? Think about what exactly happened . Did you get him cleaned up effectively or was he resistive or what happened right after?  
-Caregiver: No, after I hung up, he was okay. 
-Coach: After you came back and attended to him, he calmed down. How were you feeling?  
-Caregiver:  I was upset.  
-Coach:  . 
-
- 
-Group 3: Coming up with strategies 
-Example questions to ask:
-1.	“Let’s brainstorm ideas of how we can change some activators associated with the problem: which of the things that you identified happened before the behavior could you modify during the next week?” 
-2.	“Changes don’t have to be big: is there one small thing that I could change, either in my response to the behavior or to one of the activators that were present before it last occurred?” 
-3.	“So for this week, let me tell you what I think would be helpful. Let's choose one or two possible simple changes to the activators or consequences to try to do this week and see what happens.” 
-4.	“What would make it easy to for you to do this? For example, what time of day do you think would work best?” 
-5.	“The ABCs are building blocks learning to manage problem behaviors. Changing activators and consequences of problem behaviors can break the chain of events and reduce the frequency, severity, or duration of a problem.” 
-6.	“Let's brainstorm a possible list of ways the activators or consequences you identified for this problem could be changed.” 
-7.	“What we want to do now is brainstorm ideas for ways that you might can change or modify some of the activators or consequences you identified. Remember, there are no bad ideas.” 
-
-Conversation Example 1:
-Coach: Okay, so now we have this chain of events that happened, including the things that happened before, and the things after he yelled and screamed.  Could any of these things be changed or made a little bit different? 
-Caregiver: Maybe leave the phone ringing. It could have been the only thing I could have done differently. 
-Coach: Do you think if you left the phone ringing and didn’t leave him, it would be okay with him?
-Caregiver: Yes, it might be okay with him, but it would agitate me, because I wouldn't know who it was. So that’s why I tried to do two things at once. I'm kind of a control freak.  
-
-Conversation Example 2:
-Coach: Let’s brainstorm a few things that you might do differently the next time. 
-Caregiver: I could talk or tell her that I need to take the shower wand so I can help her. I need to take more time and let her have some time to answer and see if she would give it to me.  
-Coach: So you would ask her if you could help. I liked that you proposed asking if it is okay to help. Are there any other ideas?  
-Caregiver: I don't know of anything else, but I think just maybe wait and see if she gives me a response. Because she wants to be doing something to help. But she can't finish it and she'll get frustrated and take it off.  
-Coach: So you could wait a little longer before stepping in to help, not rush her. Is there anything else you might try, considering the idea that she wants to be helpful?  
-Caregiver: All I think I is to change the sequence of things and wait for her to try before providing help.  
-Coach:  Okay, you can ask her if she wants help, or first wait a while and see what she can do for herself first before offering to help.  These are great strategies to try this next week. 
-
-Group 4: Showing Empathy 
+Group 2: Showing Empathy 
 1.	“Caregiving is probably the hardest job in the world. 
 2.	“You are very caring trying to support your mom/loved one/etc l” 
 3.	“You are doing a great job” 
@@ -264,11 +218,11 @@ Group 4: Showing Empathy
 
 """
 
-
 INITIAL_ASSISTANT_MESSAGE = (
-    "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? For example, you might tell me who you’re caring for, your relationship to them, and what behavior or situation has been especially challenging recently. "
+    "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
+    "For example, you might tell me who you’re caring for, your relationship to them, and what behavior or "
+    "situation has been especially challenging recently."
 )
-
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -284,13 +238,36 @@ if "messages" not in st.session_state:
 
 if "ratings" not in st.session_state:
     st.session_state.ratings = {}
-    for group in EVAL_SECTIONS:
-        for item in group["items"]:
-            st.session_state.ratings[item["key"]] = "Not rated"
-            st.session_state.ratings[f"{item['key']}_comments"] = ""
+    for item in EVAL_ITEMS:
+        st.session_state.ratings[item["key"]] = 2
+        st.session_state.ratings[f"{item['key']}_comments"] = ""
+
+if "problematic_turns" not in st.session_state:
+    st.session_state.problematic_turns = [
+        {"conversation_turn": "", "why_problematic": ""}
+    ]
+
+if "problematic_turn_count" not in st.session_state:
+    st.session_state.problematic_turn_count = 1
 
 
-col_chat, col_eval = st.columns([2.2, 1.2])
+def add_problematic_turn():
+    if st.session_state.problematic_turn_count < MAX_PROBLEMATIC_TURNS:
+        st.session_state.problematic_turn_count += 1
+        st.session_state.problematic_turns.append(
+            {"conversation_turn": "", "why_problematic": ""}
+        )
+
+
+def remove_problematic_turn():
+    if st.session_state.problematic_turn_count > 1:
+        st.session_state.problematic_turn_count -= 1
+        st.session_state.problematic_turns = st.session_state.problematic_turns[
+            : st.session_state.problematic_turn_count
+        ]
+
+
+col_chat, col_eval = st.columns([2.0, 1.5])
 
 with col_chat:
     for m in st.session_state.messages:
@@ -300,41 +277,84 @@ with col_chat:
         with st.chat_message(role):
             st.markdown(m.content)
 
-    user_text = st.chat_input("Type your message...")
-
 with col_eval:
     st.subheader("Conversation evaluation")
-    st.caption("Use the controls below to rate the conversation while reviewing it.")
 
-    with st.form("evaluation_form"):
-        for group in EVAL_SECTIONS:
-            st.markdown(f"**{group['section']}**")
-            for item in group["items"]:
-                key = item["key"]
-                rating = st.radio(
-                    item["label"],
-                    options=["Yes", "No", "N/A"],
-                    horizontal=True,
-                    key=f"ui_{key}",
-                    index=["Yes", "No", "N/A"].index(
-                        st.session_state.ratings.get(key, "N/A")
-                        if st.session_state.ratings.get(key, "Not rated") != "Not rated"
-                        else "N/A"
-                    ),
-                )
-                comments = st.text_input(
-                    "Comments",
-                    value=st.session_state.ratings.get(f"{key}_comments", ""),
-                    key=f"ui_{key}_comments",
-                )
-                st.session_state.ratings[key] = rating
-                st.session_state.ratings[f"{key}_comments"] = comments
-                st.markdown("---")
+    st.markdown(
+        """
+### 1. Rating Scale
 
-        submitted = st.form_submit_button("Save ratings")
-        if submitted:
-            st.success("Ratings saved")
+**On a scale of 1–3, please rate how much you agree with the following statements.**  
+**1 = disagree**  
+**2 = neutral**  
+**3 = agree**
+"""
+    )
 
+    st.markdown("### 2. Statements")
+
+    for item in EVAL_ITEMS:
+        key = item["key"]
+
+        st.markdown(f"**{item['label']}**")
+
+        st.session_state.ratings[key] = st.radio(
+            "Rating",
+            options=[1, 2, 3],
+            horizontal=True,
+            key=f"ui_{key}",
+            index=[1, 2, 3].index(st.session_state.ratings.get(key, 2)),
+            label_visibility="collapsed",
+        )
+
+        st.session_state.ratings[f"{key}_comments"] = st.text_input(
+            "Comments",
+            value=st.session_state.ratings.get(f"{key}_comments", ""),
+            key=f"ui_{key}_comments",
+        )
+
+        st.markdown("---")
+
+    st.markdown(
+        """
+### 3. Conversation Turns
+
+Please paste any conversation turns that were problematic or not ideal and explain why.
+"""
+    )
+
+    for i in range(st.session_state.problematic_turn_count):
+        st.markdown(f"**Problematic Turn #{i + 1}**")
+
+        current_turn_value = st.session_state.problematic_turns[i]["conversation_turn"]
+        current_reason_value = st.session_state.problematic_turns[i]["why_problematic"]
+
+        st.session_state.problematic_turns[i]["conversation_turn"] = st.text_area(
+            "Conversation Turn (copy/paste)",
+            value=current_turn_value,
+            key=f"problematic_turn_text_{i}",
+            height=120,
+        )
+
+        st.session_state.problematic_turns[i]["why_problematic"] = st.text_area(
+            "Why was this response problematic?",
+            value=current_reason_value,
+            key=f"problematic_turn_reason_{i}",
+            height=100,
+        )
+
+        st.markdown("---")
+
+    add_col, remove_col = st.columns(2)
+
+    with add_col:
+        st.button("Add another turn", on_click=add_problematic_turn)
+
+    with remove_col:
+        st.button("Remove last turn", on_click=remove_problematic_turn)
+
+
+user_text = st.chat_input("Type your message...")
 
 if user_text:
     user_msg = HumanMessage(
@@ -346,16 +366,15 @@ if user_text:
     )
     st.session_state.messages.append(user_msg)
 
-    with col_chat:
-        with st.chat_message("user"):
-            st.markdown(user_text)
-
     llm = ChatOpenAI(
         model="gpt-4o",
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
     with col_chat:
+        with st.chat_message("user"):
+            st.markdown(user_text)
+
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 ai_msg = llm.invoke(st.session_state.messages)
@@ -373,7 +392,8 @@ if user_text:
 
 chat_df = messages_to_dataframe(st.session_state.messages)
 ratings_df = ratings_to_dataframe(st.session_state.ratings)
-excel_data = dataframe_to_excel_bytes(chat_df, ratings_df)
+problematic_turns_df = problematic_turns_to_dataframe(st.session_state.problematic_turns)
+excel_data = dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df)
 
 st.download_button(
     label="Download chat history as Excel",
