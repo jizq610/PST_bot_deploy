@@ -203,10 +203,8 @@ Coach: Did she make a noise?
 Caregiver: No, she didn't make any noise, but she'll just cross her arms and she's got a stern look on her face, and I know she's not very happy then.  
 
 Conversation Example 5:
-Coach:  Remember that a good behavioral plan focuses on things you can see: problems or behaviors that are specific, concrete, and countable. Can you think of any specific ones that you have observed?
+Coach: So the problem or behavior must be specific, concrete, countable, and observable. Can you think of any specific ones that you have observed?
 Caregiver: So there's a behavior that he's been doing for a while, which is he can't multitask anymore, and he attempts to multitask. For example, when he's making his coffee, he wants to carry on a conversation. And the consequences of talking are that he either mixes up the steps that he's doing it, and then gets frustrated.
-Coach: 
-
 
 Group 2: Showing Empathy 
 1.	“Caregiving is probably the hardest job in the world. 
@@ -282,7 +280,7 @@ with col_eval:
 
     st.markdown(
         """
-### 1. Rating Scale
+### 1. Evaluation Ratings
 
 **On a scale of 1–3, please rate how much you agree with the following statements.**  
 **1 = disagree**  
@@ -290,8 +288,6 @@ with col_eval:
 **3 = agree**
 """
     )
-
-    st.markdown("### 2. Statements")
 
     for item in EVAL_ITEMS:
         key = item["key"]
@@ -317,7 +313,7 @@ with col_eval:
 
     st.markdown(
         """
-### 3. Conversation Turns
+### 2. Problematic Conversation Turns
 
 Please paste any conversation turns that were problematic or not ideal and explain why.
 """
