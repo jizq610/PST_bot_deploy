@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 load_dotenv()
 
 st.set_page_config(page_title="PST Behavior Identification Bot", layout="wide")
-st.title("PST Behavior Identification Bot")
+st.markdown("## **PST Behavior Identification Bot**")
 
 
 def current_timestamp():
@@ -293,18 +293,24 @@ def remove_problematic_turn():
         ]
 
 
-left_col, right_col = st.columns([1, 2], gap="large")
+left_col, right_col = st.columns([1, 2])
+
+chat_df = messages_to_dataframe(st.session_state.messages)
+ratings_df = ratings_to_dataframe(st.session_state.ratings)
+problematic_turns_df = problematic_turns_to_dataframe(st.session_state.problematic_turns)
+excel_data = dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df)
+
 
 # LEFT: evaluation panel
 with left_col:
-    st.subheader("Conversation evaluation")
+    st.markdown("### Evaluation")
 
     # 2. Ratings second, inside scrollable container
-    with st.container(height=700, border=True):
+    with st.container(height=400, border=True):
         # 1. Problematic turns first
         st.markdown(
             """
-    ### 1. Problematic Conversation Turns
+    #### 1. Problematic Conversation Turns
 
     Please paste any conversation turns that were problematic or not ideal and explain why.
     """
@@ -341,13 +347,13 @@ with left_col:
 
         st.markdown(
             """
-### 2. Evaluation Ratings
+            #### 2. Evaluation Ratings
 
-**On a scale of 1–3, please rate how much you agree with the following statements.**  
-**1 = disagree**  
-**2 = neutral**  
-**3 = agree**
-"""
+            **On a scale of 1–3, please rate how much you agree with the following statements.**  
+            **1 = disagree**  
+            **2 = neutral**  
+            **3 = agree**
+            """
         )
 
         for item in EVAL_ITEMS:
@@ -371,14 +377,23 @@ with left_col:
             )
 
             st.markdown("---")
-
+    
+    # download button for chat history and ratings
+    st.download_button(
+        label="**Download evaluation ratings and chat history**",
+        data=excel_data,
+        file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="download_chat_history_excel",
+        type="primary",
+    )
 
             
 # RIGHT: chat panel
 with right_col:
-    st.subheader("Chat")
+    st.markdown("### Chat")
 
-    chat_container = st.container(height=700)
+    chat_container = st.container(height=400, border=True)
 
     with chat_container:
         for m in st.session_state.messages:
@@ -425,16 +440,3 @@ with right_col:
         )
         st.session_state.messages.append(assistant_msg)
         st.rerun()
-
-chat_df = messages_to_dataframe(st.session_state.messages)
-ratings_df = ratings_to_dataframe(st.session_state.ratings)
-problematic_turns_df = problematic_turns_to_dataframe(st.session_state.problematic_turns)
-excel_data = dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df)
-
-st.download_button(
-    label="Download evalation ratings and chat history",
-    data=excel_data,
-    file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    key="download_chat_history_excel",
-)
