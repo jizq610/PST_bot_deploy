@@ -15,8 +15,8 @@ load_dotenv()
 # -------------------------------------------------
 # App setup
 # -------------------------------------------------
-st.set_page_config(page_title="PST Multiagent Bot UI Testing", layout="wide")
-st.markdown("## **PST Multiagent Bot UI Testing**")
+st.set_page_config(page_title="CUIDA Multi-Agent Bot", layout="wide")
+st.markdown("## **CUIDA Multi-Agent Bot**")
 
 
 
@@ -473,13 +473,27 @@ def problematic_turns_to_dataframe(problematic_turns):
     return pd.DataFrame(rows)
 
 
+def sidebar_status_to_dataframe():
+    return pd.DataFrame(
+        [
+            {"field": "current_phase", "value": st.session_state.phase},
+            {"field": "current_stage_label", "value": phase_label(st.session_state.phase)},
+            {"field": "ac_kickoff_sent", "value": st.session_state.ac_kickoff_sent},
+            {"field": "strategy_kickoff_sent", "value": st.session_state.strategy_kickoff_sent},
+        ]
+    )
+
+
 def dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df):
     output = BytesIO()
+
+    sidebar_df = sidebar_status_to_dataframe()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         chat_df.to_excel(writer, index=False, sheet_name="chat_history")
         ratings_df.to_excel(writer, index=False, sheet_name="ratings")
         problematic_turns_df.to_excel(writer, index=False, sheet_name="problematic_turns")
+        sidebar_df.to_excel(writer, index=False, sheet_name="sidebar_status")
 
     return output.getvalue()
 
@@ -621,22 +635,6 @@ initialize_session_state()
 
 
 # -------------------------------------------------
-# Sidebar
-# -------------------------------------------------
-with st.sidebar:
-    st.header("Status")
-    st.write(f"**Current phase:** `{st.session_state.phase}`")
-    st.write(f"**Current stage:** {phase_label(st.session_state.phase)}")
-    st.write(f"**AC kickoff sent:** `{st.session_state.ac_kickoff_sent}`")
-    st.write(f"**Strategy kickoff sent:** `{st.session_state.strategy_kickoff_sent}`")
-    st.divider()
-
-    if st.button("Reset conversation", type="secondary"):
-        reset_conversation()
-        st.rerun()
-
-
-# -------------------------------------------------
 # Main layout
 # -------------------------------------------------
 left_col, right_col = st.columns([1, 2])
@@ -733,7 +731,7 @@ with left_col:
     st.download_button(
         label="**Download evaluation ratings and chat history**",
         data=excel_data,
-        file_name=f"pst_3agent_ui_testing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        file_name=f"pst_3agent_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="download_chat_history_excel",
         type="primary",
@@ -759,7 +757,6 @@ with right_col:
                 st.markdown(m.content)
 
         live_chat_area = st.empty()
-    st.caption(f"**Current stage:** {phase_label(st.session_state.phase)}")
     user_text = st.chat_input("Type your message...")
 
     if user_text:
@@ -774,3 +771,4 @@ with right_col:
         st.rerun()
         
 
+        
