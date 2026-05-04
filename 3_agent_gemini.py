@@ -327,7 +327,7 @@ Group 2: Showing Empathy
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "model2"
+MODEL_NAME = "gemini-2.5-flash"
 
 INITIAL_ASSISTANT_MESSAGE = (
     "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
@@ -418,7 +418,7 @@ def messages_to_dataframe(messages):
             {
                 "timestamp": m.additional_kwargs.get("timestamp", ""),
                 "role": role,
-                "model_name": m.additional_kwargs.get("model_name", ""),
+                "model_name": "model2",
                 "phase": m.additional_kwargs.get("phase", ""),
                 "content": m.content,
             }

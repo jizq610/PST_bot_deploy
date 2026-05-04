@@ -1,5 +1,5 @@
-# GPT is model 1
-
+# GPT is model 1 gpt-4o-mini
+ 
 import os
 from io import BytesIO
 from datetime import datetime
@@ -325,7 +325,7 @@ Group 2: Showing Empathy
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "model1"
+MODEL_NAME = "gpt-4o-mini"
 
 INITIAL_ASSISTANT_MESSAGE = (
     "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
@@ -416,7 +416,7 @@ def messages_to_dataframe(messages):
             {
                 "timestamp": m.additional_kwargs.get("timestamp", ""),
                 "role": role,
-                "model_name": m.additional_kwargs.get("model_name", ""),
+                "model_name": "model1",
                 "phase": m.additional_kwargs.get("phase", ""),
                 "content": m.content,
             }
