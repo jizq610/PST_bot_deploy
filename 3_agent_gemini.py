@@ -1,4 +1,4 @@
-# GPT is model 1
+# Gemini is model 2 (gemini-2.5-flash)
 
 import os
 from io import BytesIO
@@ -17,6 +17,7 @@ load_dotenv()
 # -------------------------------------------------
 st.set_page_config(page_title="CUIDA Multi-Agent Bot", layout="wide")
 st.markdown("## **CUIDA Multi-Agent Bot**")
+
 
 
 
@@ -322,10 +323,11 @@ Group 2: Showing Empathy
 
 
 
+
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "model1"
+MODEL_NAME = "model2"
 
 INITIAL_ASSISTANT_MESSAGE = (
     "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
@@ -602,7 +604,8 @@ def run_llm_and_update_conversation(user_text: str):
 
     llm = ChatOpenAI(
         model=MODEL_NAME,
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.getenv("GEMINI_API_KEY"),
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
 
     ai_msg = llm.invoke(st.session_state.messages)
@@ -755,6 +758,3 @@ with right_col:
                     run_llm_and_update_conversation(user_text)
 
         st.rerun()
-        
-
-        
