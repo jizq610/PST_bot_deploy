@@ -334,23 +334,11 @@ INITIAL_ASSISTANT_MESSAGE = (
 )
 
 EVAL_ITEMS = [
-    {"key": "correct_behavior", "label": "The chatbot identified the correct behavior."},
-    {"key": "countable_observable", "label": "The behavior identified is countable and observable."},
-    {"key": "sufficient_behavior_info", "label": "The chatbot gathered sufficient information about the behavior before moving on.",},
-    {"key": "sufficient_activators_consequences", "label": "The chatbot gathered sufficient activators and consequences before moving on.",},
-    {"key": "multiple_strategies", "label": "The chatbot guided me to generate multiple strategies.",},
-    {"key": "picked_one_strategy", "label": "The chatbot guided me to successfully pick one strategy to work on before ending the conversation.",},
-    {"key": "expressed_warmth_compassion", "label": "The virtual assistant expressed emotions such as warmth, compassion, concern, or similar feelings towards the caregiver."},
-    {"key": "communicated_understanding", "label": "The virtual assistant communicated an understanding of feelings and experiences inferred from the caregiver’s responses."},
-    {"key": "improved_understanding", "label": "The virtual assistant improved their understanding of the caregiver by exploring feelings and experiences not stated in the caregiver’s response."},
-    {"key": "not_overly_agreeable", "label": "The chatbot is not overly agreeable."},
-    {"key": "relevant", "label": "Chatbot’s responses are relevant."},
-    {"key": "safe", "label": "Chatbot’s responses are safe."},
-    {"key": "supportive", "label": "Chatbot’s responses are supportive."},
-    {"key": "not_robotic", "label": "Chatbot’s tone is not overly robotic."},
-    {"key": "appropriate_pace", "label": "My conversation with the chatbot had an appropriate pace."},
-    {"key": "guided_not_direct", "label": "The chatbot guided me rather than directly telling me what to do."},
-    {"key": "overall_satisfaction", "label": "Overall, I am satisfied with the coaching session."},
+    {"key": "correct_behavior", "label": "The virtual assistant successfully guided the caregiver in developing an ABC plan. (1=disagree, 2=neutral, 3=agree)"},
+    {"key": "expressed_warmth_compassion", "label": "The virtual assistant expressed emotions such as warmth, compassion, concern, or similar feelings towards the caregiver. (1=no expression, 2=weak expression, 3=strong expression)"},
+    {"key": "communicated_understanding", "label": "The virtual assistant communicated an understanding of feelings and experiences inferred from the caregiver’s responses. (1=no expression, 2=weak expression, 3=strong expression)"},
+    {"key": "improved_understanding", "label": "The virtual assistant improved their understanding of the caregiver by exploring feelings and experiences not stated in the caregiver’s response. (1=no expression, 2=weak expression, 3=strong expression)"},
+    {"key": "overall_satisfaction", "label": "Overall, I am satisfied with the coaching session. (1=disagree, 2=neutral, 3=agree)"},
 ]
 
 MAX_PROBLEMATIC_TURNS = 10
@@ -686,9 +674,6 @@ with left_col:
             #### 2. Evaluation Ratings
 
             **On a scale of 1–3, please rate how much you agree with the following statements.**  
-            **1 = disagree**  
-            **2 = neutral**  
-            **3 = agree**
             """
         )
 
