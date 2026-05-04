@@ -717,7 +717,7 @@ with left_col:
     st.download_button(
         label="**Download evaluation ratings and chat history**",
         data=excel_data,
-        file_name=f"pst_3agent_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        file_name=f"3agent_model1.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="download_chat_history_excel",
         type="primary",
