@@ -592,7 +592,9 @@ def advance_phase_after_handoff(clean_text: str):
             st.session_state.strategy_kickoff_sent = True
 
     else:
-        completion_msg = make_ai_message("We have completed the strategy step.")
+        completion_msg = make_ai_message(
+            "Congrats on successfully developing an ABC problem solving plan! Please let me know if you have any further questions.\n\nHANDOFF_READY"
+        )
         completion_msg.additional_kwargs["phase"] = "STRATEGY"
         st.session_state.messages.append(completion_msg)
 
