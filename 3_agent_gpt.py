@@ -716,6 +716,15 @@ with left_col:
     problematic_turns_df = problematic_turns_to_dataframe(st.session_state.problematic_turns)
     excel_data = dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df)
 
+    missing_required = [
+        item["label"]
+        for item in EVAL_ITEMS
+        if st.session_state.ratings.get(item["key"], "") == ""
+    ]
+
+    if missing_required:
+        st.warning("Please complete all evaluation ratings before downloading.")
+
     st.download_button(
         label="**Download evaluation ratings and chat history**",
         data=excel_data,
@@ -723,6 +732,7 @@ with left_col:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="download_chat_history_excel",
         type="primary",
+        disabled=len(missing_required) > 0,
     )
 
 
