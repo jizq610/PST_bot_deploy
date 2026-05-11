@@ -18,6 +18,17 @@ load_dotenv()
 st.set_page_config(page_title="CUIDA Multi-Agent Bot", layout="wide")
 st.markdown("## **CUIDA Multi-Agent Bot**")
 
+## this gets rid of the "Instructions" box that appears in the input area, which is confusing for users and not relevant for this application
+# st.markdown(
+#     """
+#     <style>
+#     div[data-testid="InputInstructions"] {
+#         display: none;
+#     }
+#     </style>
+#     """,
+#     unsafe_allow_html=True,
+# )
 
 
 BEHAVIOR_PROMPT =  """
@@ -722,11 +733,22 @@ with left_col:
         if st.session_state.ratings.get(item["key"], "") == ""
     ]
 
-    if missing_required:
-        st.warning("Please complete all evaluation ratings before downloading.")
+    
 
     st.download_button(
-        label="**Download evaluation ratings and chat history**",
+        label="Download Current Progress",
+        data=excel_data,
+        file_name=f"3agent_model1_progress_so_far.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="download_progress_so_far_excel",
+        type="secondary",
+    )
+
+    if missing_required:
+        st.warning("Complete all ratings to enable the final download.")
+
+    st.download_button(
+        label="**Download Final Evaluation**",
         data=excel_data,
         file_name=f"3agent_model1.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -734,6 +756,7 @@ with left_col:
         type="primary",
         disabled=len(missing_required) > 0,
     )
+
 
 
 # -------------------------------------------------
@@ -767,6 +790,7 @@ with right_col:
                     run_llm_and_update_conversation(user_text)
 
         st.rerun()
+    
         
 
         

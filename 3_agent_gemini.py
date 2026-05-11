@@ -725,13 +725,24 @@ with left_col:
         if st.session_state.ratings.get(item["key"], "") == ""
     ]
 
-    if missing_required:
-        st.warning("Please complete all evaluation ratings before downloading.")
+    
 
     st.download_button(
-        label="**Download evaluation ratings and chat history**",
+        label="Download Current Progress",
         data=excel_data,
-        file_name=f"3agent_model1.xlsx",
+        file_name=f"3agent_model2_progress_so_far.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="download_progress_so_far_excel",
+        type="secondary",
+    )
+
+    if missing_required:
+        st.warning("Complete all ratings to enable the final download.")
+
+    st.download_button(
+        label="**Download Final Evaluation**",
+        data=excel_data,
+        file_name=f"3agent_model2.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="download_chat_history_excel",
         type="primary",
