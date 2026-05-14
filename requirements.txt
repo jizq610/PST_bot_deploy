@@ -4,3 +4,4 @@ pandas
 openpyxl
 langchain-openai
 langchain-core
+langchain-anthropic
