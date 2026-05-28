@@ -5,3 +5,5 @@ openpyxl
 langchain-openai
 langchain-core
 langchain-anthropic
+google-auth
+google-api-python-client
