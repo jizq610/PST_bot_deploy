@@ -19,44 +19,9 @@ load_dotenv()
 # -------------------------------------------------
 # App setup
 # -------------------------------------------------
-st.set_page_config(page_title="STAR-C Virtual Assistant Evaluation", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="STAR-C Virtual Assistant Evaluation", layout="wide")
 st.markdown("## **STAR-C Virtual Assistant Evaluation**")
 
-
-# -------------------------------------------------
-# Sidebar instructions
-# -------------------------------------------------
-with st.sidebar:
-    st.markdown("## Instructions")
-
-    st.markdown(
-    """
-**Thank you for participating in the evaluation of the STAR-C virtual assistant models.**
-
-In this evaluation, please think about a caregiver that you’ve worked with before, and a specific scenario that the caregiver went through ABC Problem-Solving. You will act as the caregiver to chat with the virtual assistant. You will evaluate three different virtual assistants using the same scenario. Please try to use consistent wording and reply as much as possible.  
-
-### Step 1. Think about a caregiver that you’ve worked with before  
-
-Please share a brief description of the caregiver and the caregiving scenario. **You only need to do this once.** 
-
-
-### Step 2. Chat with the virtual assistant 
-
-The virtual assistant will respond in real-time. Please continue chatting with the virtual assistant through an entire ABC Problem-Solving plan until you see the keyword **“HANDOFF_COMPLETE”**, which indicates that the conversation has ended. Please complete the chatbot conversation and evaluation **in one session** without closing or refreshing the browser window, which may cause the progress to be lost. 
-
-
-### Step 3. Evaluate the virtual assistant 
-
-a. After completing each conversation, review the full dialogue and complete the evaluation form located on the left, only focusing on the current conversation. We appreciate any written feedback you may have in addition to the quantitative ratings. 
-
-b. After completing the evaluation. Click the **“Submit Current Evaluation”** button to submit your ratings and feedback; **these do not save automatically.** Please wait for the message **“Upload successful!”** to show up before closing the window. All dialogue transcripts and feedback will be submitted for team-based review and comparison across models. 
-
-c. Once the conversation is complete, end the session by closing the window.  
-
-
-**Repeat the process with the next two models using the same persona you have described in the first test.**
-"""
-)
 
 
 BEHAVIOR_PROMPT =  """
@@ -380,9 +345,6 @@ EVAL_ITEMS = [
     {"key": "overall_satisfaction", "label": "Overall, I am satisfied with the coaching session. (1=disagree, 2=neutral, 3=agree)"},
 ]
 
-MAX_PROBLEMATIC_TURNS = 10
-
-
 # -------------------------------------------------
 # Helper functions
 # -------------------------------------------------
@@ -480,27 +442,6 @@ def ratings_to_dataframe(ratings):
     return pd.DataFrame(rows)
 
 
-def problematic_turns_to_dataframe(problematic_turns):
-    rows = []
-    saved_index = 1
-
-    for item in problematic_turns:
-        conversation_turn = item.get("conversation_turn", "").strip()
-        why_problematic = item.get("why_problematic", "").strip()
-
-        if conversation_turn or why_problematic:
-            rows.append(
-                {
-                    "problematic_turn_number": saved_index,
-                    "conversation_turn": conversation_turn,
-                    "why_problematic": why_problematic,
-                }
-            )
-            saved_index += 1
-
-    return pd.DataFrame(rows)
-
-
 def sidebar_status_to_dataframe():
     return pd.DataFrame(
         [
@@ -520,50 +461,30 @@ def persona_description_to_dataframe():
         ]
     )
 
-def study_code_to_dataframe():
+def study_id_to_dataframe():
     return pd.DataFrame(
         [
             {
-                "study_code": st.session_state.study_code,
+                "study_id": st.session_state.study_id,
             }
         ]
     )
 
-def dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df):
+def dataframe_to_excel_bytes(chat_df, ratings_df):
     output = BytesIO()
 
     sidebar_df = sidebar_status_to_dataframe()
     persona_df = persona_description_to_dataframe()
-    study_code_df = study_code_to_dataframe()
+    study_id_df = study_id_to_dataframe()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         chat_df.to_excel(writer, index=False, sheet_name="chat_history")
         ratings_df.to_excel(writer, index=False, sheet_name="ratings")
-        problematic_turns_df.to_excel(writer, index=False, sheet_name="problematic_turns")
         sidebar_df.to_excel(writer, index=False, sheet_name="sidebar_status")
         persona_df.to_excel(writer, index=False, sheet_name="persona_description")
-        study_code_df.to_excel(writer, index=False, sheet_name="study_code")
+        study_id_df.to_excel(writer, index=False, sheet_name="study_id")
 
     return output.getvalue()
-
-
-def add_problematic_turn():
-    if st.session_state.problematic_turn_count < MAX_PROBLEMATIC_TURNS:
-        st.session_state.problematic_turn_count += 1
-        st.session_state.problematic_turns.append(
-            {
-                "conversation_turn": "",
-                "why_problematic": "",
-            }
-        )
-
-
-def remove_problematic_turn():
-    if st.session_state.problematic_turn_count > 1:
-        st.session_state.problematic_turn_count -= 1
-        st.session_state.problematic_turns = st.session_state.problematic_turns[
-            : st.session_state.problematic_turn_count
-        ]
 
 
 def reset_conversation():
@@ -599,22 +520,11 @@ def initialize_session_state():
             st.session_state.ratings[item["key"]] = ""
             st.session_state.ratings[f"{item['key']}_comments"] = ""
 
-    if "problematic_turns" not in st.session_state:
-        st.session_state.problematic_turns = [
-            {
-                "conversation_turn": "",
-                "why_problematic": "",
-            }
-        ]
-
-    if "problematic_turn_count" not in st.session_state:
-        st.session_state.problematic_turn_count = 1
-
     if "persona_description" not in st.session_state:
         st.session_state.persona_description = ""
 
-    if "study_code" not in st.session_state:
-        st.session_state.study_code = ""
+    if "study_id" not in st.session_state:
+        st.session_state.study_id = ""
 
 
 def set_message_phase_metadata(message):
@@ -724,15 +634,15 @@ initialize_session_state()
 
 
 # -------------------------------------------------
-# Study code
+# Study ID
 # -------------------------------------------------
-st.markdown("### Study Code")
+st.markdown("### Study ID")
 
-st.session_state.study_code = st.text_input(
-    "Please enter your study code.",
-    value=st.session_state.study_code,
+st.session_state.study_id = st.text_input(
+    "Please enter your study ID.",
+    value=st.session_state.study_id,
     width=400,
-    key="study_code_input",
+    key="study_id_input",
 )
 
 
@@ -741,11 +651,31 @@ st.session_state.study_code = st.text_input(
 # -------------------------------------------------
 st.markdown("### Describe Caregiving Scenario and Caregiver")
 
+st.markdown(
+    """
+<div style="line-height: 1.35; margin-bottom: 0.35rem;">
+  <p style="margin-bottom: 0.35rem;">
+    If this is your first test, please describe the caregiver and caregiving scenario you will portray during this evaluation. If this is your second or third test, please use the same caregiver and scenario description. You do not need to describe it again.
+  </p>
+  <p style="margin-bottom: 0.15rem;">Please include the caregiver's:</p>
+  <ul style="margin-top: 0; margin-bottom: 0.35rem;">
+    <li>Age</li>
+    <li>Gender</li>
+    <li>Occupation</li>
+    <li>Who they are caring for</li>
+    <li>Family situation (e.g., who lives with the care receiver, whether the caregiver also takes care of children)</li>
+  </ul>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
 st.session_state.persona_description = st.text_area(
-    "If this is your first test, please describe the caregiving scenario and caregiver you will portray during this evaluation. If this is your second or third test, please use the same caregiving scenario and caregiver description. You do not need to describe it again.",
+    "Caregiver and caregiving scenario",
     value=st.session_state.persona_description,
     height=100,
     key="persona_description_input",
+    label_visibility="collapsed",
 )
 
 
@@ -764,40 +694,7 @@ with left_col:
     with st.container(height=400, border=True):
         st.markdown(
             """
-            #### 1. Problematic Conversation Turns
-
-            Please paste any conversation turns that were problematic or not ideal and explain why.
-            """
-        )
-
-        for i in range(st.session_state.problematic_turn_count):
-            st.markdown(f"**Problematic Turn #{i + 1}**")
-
-            st.session_state.problematic_turns[i]["conversation_turn"] = st.text_input(
-                "Conversation Turn (copy/paste)",
-                value=st.session_state.problematic_turns[i]["conversation_turn"],
-                key=f"problematic_turn_text_{i}",
-            )
-
-            st.session_state.problematic_turns[i]["why_problematic"] = st.text_input(
-                "Why was this response problematic?",
-                value=st.session_state.problematic_turns[i]["why_problematic"],
-                key=f"problematic_turn_reason_{i}",
-            )
-
-            st.markdown("---")
-
-        add_col, remove_col = st.columns(2)
-
-        with add_col:
-            st.button("Add another turn", on_click=add_problematic_turn)
-
-        with remove_col:
-            st.button("Remove last turn", on_click=remove_problematic_turn)
-
-        st.markdown(
-            """
-            #### 2. Evaluation Ratings
+            #### Evaluation Ratings
 
             **On a scale of 1–3, please rate how much you agree with the following statements.**  
             """
@@ -828,7 +725,7 @@ with left_col:
             st.session_state.ratings[key] = selected_rating if selected_rating is not None else ""
 
             st.session_state.ratings[f"{key}_comments"] = st.text_input(
-                "Comments",
+                "Please briefly share why you chose this rating and include any relevant virtual assistant responses, if applicable.",
                 value=st.session_state.ratings.get(f"{key}_comments", ""),
                 key=f"ui_{key}_comments",
             )
@@ -837,8 +734,7 @@ with left_col:
 
     chat_df = messages_to_dataframe(st.session_state.messages)
     ratings_df = ratings_to_dataframe(st.session_state.ratings)
-    problematic_turns_df = problematic_turns_to_dataframe(st.session_state.problematic_turns)
-    excel_data = dataframe_to_excel_bytes(chat_df, ratings_df, problematic_turns_df)
+    excel_data = dataframe_to_excel_bytes(chat_df, ratings_df)
 
     # missing_required = [
     #     item["label"]
@@ -859,9 +755,13 @@ with left_col:
     #     disabled=len(missing_required) > 0,
     # )
 
-    st.markdown("### Google Drive Upload")
+    #st.markdown("### Google Drive Upload")
 
-    if st.button("Submit Current Evaluation", key="upload_to_drive_button"):
+    if st.button(
+        "Submit Current Evaluation",
+        key="upload_to_drive_button",
+        type="primary"
+    ):
         try:
             uploaded_file = upload_excel_to_drive(
                 excel_data,
