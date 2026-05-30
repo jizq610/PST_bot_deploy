@@ -359,7 +359,7 @@ Group 2: Showing Empathy
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "gpt-4o-mini"
+MODEL_NAME = "gemini-2.5-flash"
 
 INITIAL_ASSISTANT_MESSAGE = (
     "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
@@ -438,7 +438,7 @@ def messages_to_dataframe(messages):
             {
                 "timestamp": m.additional_kwargs.get("timestamp", ""),
                 "role": role,
-                "model_name": "model1",
+                "model_name": "model2",
                 "phase": m.additional_kwargs.get("phase", ""),
                 "content": m.content,
             }
@@ -591,7 +591,8 @@ def run_llm_and_update_conversation(user_text: str):
 
     llm = ChatOpenAI(
         model=MODEL_NAME,
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.getenv("GEMINI_API_KEY"),
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
 
     ai_msg = llm.invoke(st.session_state.messages)
@@ -759,7 +760,7 @@ with left_col:
     # st.download_button(
     #     label="**Download evaluation ratings and chat history**",
     #     data=excel_data,
-    #     file_name="3agent_model1.xlsx",
+    #     file_name="3agent_model2.xlsx",
     #     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     #     key="download_chat_history_excel",
     #     type="primary",
@@ -776,7 +777,7 @@ with left_col:
         try:
             uploaded_file = upload_excel_to_drive(
                 excel_data,
-                f"test_3agent_model1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                f"test_3agent_model2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             )
 
             st.success("Upload successful!")
