@@ -69,7 +69,6 @@ Include HANDOFF_READY only if ALL conditions below were explicitly confirmed by 
 •	A single, observable behavior has been clearly identified 
 •	Sufficient information about the behavior is collected, including the 4Ws, severity, frequency, duration, etc. 
 •	The caregiver has explicitly confirmed that this is the behavior they want to work on. 
-•	You have confirmed that the caregiver doesn’t have any more questions 
 •	Constraints: 
 o	Do NOT include HANDOFF_READY if any clarification is still needed. If any question appears, HANDOFF_READY MUST NOT appear. 
 o	Implicit agreement (e.g., “sounds good”) is not sufficient. 
@@ -302,7 +301,7 @@ Step 6. Guide the caregiver to select one change target. Ask what they would lik
 # HANDOFF_READY Conditions and Constraints
 Include HANDOFF_READY only if ALL conditions below were explicitly confirmed by the caregiver in prior turns.  
 •	Caregiver has finished discussing ALL the personalized changes they want to discuss.   
-•	You have completed all steps: step 5, step 6, and step 7 with the caregiver   
+•	You have completed all steps: step 5 and step 6 with the caregiver   
 •	Caregiver explicitly commits to one specific strategy.    
 •	Constraints: 
 o	Do NOT include HANDOFF_READY if any clarification is still needed. If any question appears, HANDOFF_READY MUST NOT appear. 
@@ -356,6 +355,7 @@ Group 2: Showing Empathy
 """
 
 
+
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
@@ -397,6 +397,13 @@ def get_system_prompt_for_phase(phase: str) -> str:
         "BEHAVIOR": BEHAVIOR_PROMPT,
         "AC": AC_PROMPT,
         "STRATEGY": STRATEGY_PROMPT,
+    }[phase]
+
+
+def get_kickoff_message_for_phase(phase: str) -> str:
+    return {
+        "AC": "Now let's look at what happens before and after the behavior. What usually happens right before the behavior?",
+        "STRATEGY": "Now let's think about strategies for the behavior. What could be changed regarding what happened before the behavior?",
     }[phase]
 
 
@@ -557,17 +564,17 @@ def set_message_phase_metadata(message):
 def advance_phase_after_handoff(clean_text: str):
     current_phase = st.session_state.phase
 
-    if clean_text:
-        assistant_msg = make_ai_message(clean_text)
-        assistant_msg.additional_kwargs["phase"] = current_phase
-        st.session_state.messages.append(assistant_msg)
-
     if current_phase == "BEHAVIOR":
         st.session_state.phase = "AC"
         st.session_state.messages[0] = SystemMessage(content=get_system_prompt_for_phase("AC"))
 
         if not st.session_state.ac_kickoff_sent:
             st.session_state.ac_kickoff_sent = True
+            kickoff_text = get_kickoff_message_for_phase("AC")
+            message_text = f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
+            kickoff_msg = make_ai_message(message_text)
+            kickoff_msg.additional_kwargs["phase"] = "AC"
+            st.session_state.messages.append(kickoff_msg)
 
     elif current_phase == "AC":
         st.session_state.phase = "STRATEGY"
@@ -575,10 +582,15 @@ def advance_phase_after_handoff(clean_text: str):
 
         if not st.session_state.strategy_kickoff_sent:
             st.session_state.strategy_kickoff_sent = True
+            kickoff_text = get_kickoff_message_for_phase("STRATEGY")
+            message_text = f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
+            kickoff_msg = make_ai_message(message_text)
+            kickoff_msg.additional_kwargs["phase"] = "STRATEGY"
+            st.session_state.messages.append(kickoff_msg)
 
     else:
         completion_msg = make_ai_message(
-            "Congrats on successfully developing an ABC problem solving plan! Please let me know if you have any further questions.\n\nHANDOFF_READY"
+            "You have completed the ABC problem solving plan.\n\nHANDOFF_READY"
         )
         completion_msg.additional_kwargs["phase"] = "STRATEGY"
         st.session_state.messages.append(completion_msg)
@@ -662,22 +674,27 @@ st.session_state.study_id = st.text_input(
 # -------------------------------------------------
 # Persona description
 # -------------------------------------------------
-st.markdown("### Describe Caregiving Scenario and Caregiver")
+st.markdown("### Describe the Caregiver and Caregiving Scenario")
 
 st.markdown(
     """
 <div style="line-height: 1.35; margin-bottom: 0.35rem;">
   <p style="margin-bottom: 0.35rem;">
-    If this is your first test, please describe the caregiver and caregiving scenario you will portray during this evaluation. If this is your second or third test, please use the same caregiver and scenario description. You do not need to describe it again.
+    If you're testing the first version, please describe the caregiver and caregiving scenario you will portray. If you're testing Versions 2 or 3, please use the same caregiver and scenario as before. You do not need to describe it again (i.e., you may skip this section).
   </p>
-  <p style="margin-bottom: 0.15rem;">Please include the caregiver's:</p>
+  <p style="margin-bottom: 0.15rem;">Please include caregiver characteristics, such as:</p>
   <ul style="margin-top: 0; margin-bottom: 0.35rem;">
     <li>Age</li>
     <li>Gender</li>
-    <li>Occupation</li>
-    <li>Who they are caring for</li>
-    <li>Family situation (e.g., who lives with the care receiver, whether the caregiver also takes care of children)</li>
+    <li>Occupation (if any)</li>
+    <li>Relationship to the care recipient</li>
+    <li>Who they live with (including whether they live with the care recipient)</li>
+    <li>Family composition (e.g., whether they have young children)</li>
+    <li>The behavior that the caregiver would like to address with an ABC plan</li>
   </ul>
+  <p style="margin-bottom: 0.35rem;">
+    Example: this caregiver is a 67 y.o. female, retired nurse caring for her husband with early-stage Alzheimer's. They live by themselves and have two adult children living out of state. The main problem they're having is the husband wandering out when the caregiver does yard work.
+  </p>
 </div>
 """,
     unsafe_allow_html=True,
