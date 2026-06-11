@@ -752,10 +752,9 @@ with left_col:
 
             st.session_state.ratings[key] = selected_rating if selected_rating is not None else ""
 
-            st.session_state.ratings[f"{key}_comments"] = st.text_area(
+            st.session_state.ratings[f"{key}_comments"] = st.text_input(
                 "Please briefly share why you chose this rating and include any relevant virtual assistant responses, if applicable.",
                 value=st.session_state.ratings.get(f"{key}_comments", ""),
-                height=30,   # adjust as needed
                 key=f"ui_{key}_comments",
             )
 
@@ -794,7 +793,7 @@ with left_col:
         try:
             uploaded_file = upload_excel_to_drive(
                 excel_data,
-                f"test_3agent_model2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                f"test_3agent_modelb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             )
 
             st.success("Upload successful!")
