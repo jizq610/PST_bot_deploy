@@ -402,8 +402,8 @@ def get_system_prompt_for_phase(phase: str) -> str:
 
 def get_kickoff_message_for_phase(phase: str) -> str:
     return {
-        "AC": "Now let's look at what happens before and after the behavior. What usually happens right before the behavior?",
-        "STRATEGY": "Now let's think about strategies for the behavior. What could be changed regarding what happened before the behavior?",
+        "AC": "Now let’s look at what happens before and after the behavior. In addition to what we've discussed so far, any thoughts that come to your mind?",
+        "STRATEGY": "Now let's think about strategies. What can we change before or (what happens) after the behavior to see if it makes a difference going forward?",
     }[phase]
 
 
