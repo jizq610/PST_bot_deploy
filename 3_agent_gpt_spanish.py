@@ -590,9 +590,10 @@ Grupo 2: Mostrar empatía
 MODEL_NAME = "gpt-4o-mini"
 
 INITIAL_ASSISTANT_MESSAGE = (
-    "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
-    "For example, you might tell me who you’re caring for, your relationship to them, and what behavior or "
-    "situation has been especially challenging recently."
+    "Hola, me alegra que esté aquí. Para comenzar, "
+    "¿podría contarme un poco sobre su situación como cuidador? "
+    "Por ejemplo, puede compartir a quién cuida, cuál es su relación "
+    "con esa persona y qué situación le ha resultado especialmente difícil últimamente."
 )
 
 EVAL_ITEMS = [
@@ -630,8 +631,15 @@ def get_system_prompt_for_phase(phase: str) -> str:
 
 def get_kickoff_message_for_phase(phase: str) -> str:
     return {
-        "AC": "Now let’s look at what happens before and after the behavior. In addition to what we've discussed so far, any thoughts that come to your mind?",
-        "STRATEGY": "Now let's think about strategies. What can we change before or (what happens) after the behavior to see if it makes a difference going forward?",
+        "AC": (
+            "Ahora veamos qué ocurre antes y después del comportamiento "
+            "que hemos identificado. ¿Qué suele ocurrir justo antes?"
+        ),
+        "STRATEGY": (
+            "Ahora pensemos en posibles estrategias. "
+            "¿Qué podría cambiar antes o después del comportamiento "
+            "para ver si la situación mejora?"
+        ),
     }[phase]
 
 
@@ -818,7 +826,7 @@ def advance_phase_after_handoff(clean_text: str):
 
     else:
         completion_msg = make_ai_message(
-            "You have completed the ABC problem solving plan.\n\nHANDOFF_READY"
+            "Ha completado el plan de resolución de problemas de las tres C."
         )
         completion_msg.additional_kwargs["phase"] = "STRATEGY"
         st.session_state.messages.append(completion_msg)
