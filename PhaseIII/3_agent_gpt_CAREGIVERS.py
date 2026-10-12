@@ -22,8 +22,12 @@ load_dotenv()
 # -------------------------------------------------
 # App setup
 # -------------------------------------------------
-st.set_page_config(page_title="STAR-C Virtual Assistant", layout="wide")
+st.set_page_config(page_title="STAR-C Virtual Assistant", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("## **STAR-C Virtual Assistant**")
+
+header_col, right_col = st.columns([6, 1])
+with right_col:
+    st.page_link("pages/dashboard.py", label="Dashboard")
 
 
 
