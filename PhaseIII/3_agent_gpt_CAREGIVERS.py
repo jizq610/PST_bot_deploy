@@ -2,6 +2,7 @@
  
 import json
 import os
+import sqlite3
 import uuid
 from io import BytesIO
 from datetime import datetime
@@ -760,34 +761,171 @@ def current_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def get_monitoring_path():
-    return os.getenv("MONITORING_PATH", os.path.join(os.getcwd(), "monitoring", "session_events.jsonl"))
+def get_db_path():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "conversations.db"))
 
 
-def log_monitor_event(event_type: str, role: str, content: str, phase: str = ""):
-    path = get_monitoring_path()
-    session_id = st.session_state.get("session_id")
+def get_db_connection():
+    conn = sqlite3.connect(get_db_path(), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
-    if not session_id:
-        session_id = uuid.uuid4().hex
-        st.session_state.session_id = session_id
 
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-
-    record = {
-        "session_id": session_id,
-        "event_type": event_type,
-        "role": role,
-        "phase": phase or st.session_state.get("phase", ""),
-        "content": (content or "").strip(),
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-
+def init_monitoring_db():
+    conn = get_db_connection()
     try:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                last_activity TEXT NOT NULL,
+                status TEXT DEFAULT 'active'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                phase TEXT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS monitoring_errors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                error_text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_monitoring_error(session_id: str, error_text: str):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO monitoring_errors (session_id, error_text, created_at) VALUES (?, ?, ?)",
+            (session_id, str(error_text), datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_session_start(session_id: str):
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (session_id, started_at, last_activity, status) VALUES (?, ?, ?, 'active')",
+            (session_id, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_message(session_id: str, role: str, content: str, phase: str = ""):
+    if not content or not content.strip():
+        return
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO messages (session_id, role, phase, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, role, phase, content.strip(), now),
+        )
+        conn.execute(
+            "UPDATE sessions SET last_activity = ? WHERE session_id = ?",
+            (now, session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_drive_service():
+    credentials = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/drive.file"],
+    )
+    return build("drive", "v3", credentials=credentials)
+
+
+def find_drive_file(service, file_name: str):
+    folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+    response = service.files().list(
+        q=f"name='{file_name}' and '{folder_id}' in parents and trashed=false",
+        fields="files(id, name)",
+        supportsAllDrives=True,
+    ).execute()
+    files = response.get("files", [])
+    return files[0] if files else None
+
+
+def save_session_transcript_to_drive(session_id: str):
+    try:
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT created_at, role, phase, content FROM messages WHERE session_id = ? ORDER BY id",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return
+
+        chat_df = pd.DataFrame(rows, columns=["timestamp", "role", "phase", "content"])
+        chat_df["session_id"] = session_id
+        ratings_df = ratings_to_dataframe(st.session_state.get("ratings", {}))
+
+        excel_bytes = dataframe_to_excel_bytes(chat_df, ratings_df)
+        service = get_drive_service()
+        file_name = f"STAR-C_session_{session_id}.xlsx"
+        existing_file = find_drive_file(service, file_name)
+
+        if existing_file:
+            service.files().update(
+                fileId=existing_file["id"],
+                media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
+                supportsAllDrives=True,
+            ).execute()
+        else:
+            file_metadata = {"name": file_name, "parents": [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]}
+            service.files().create(
+                body=file_metadata,
+                media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
+                fields="id, name",
+                supportsAllDrives=True,
+            ).execute()
+    except Exception as exc:
+        record_monitoring_error(session_id, f"Drive backup failed: {exc}")
+        raise
+
+
+def init_session_for_participant():
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = uuid.uuid4().hex
+        record_session_start(st.session_state.session_id)
+        record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
+        try:
+            save_session_transcript_to_drive(st.session_state.session_id)
+        except Exception:
+            pass
+
+
+init_monitoring_db()
 
 
 def phase_label(phase: str) -> str:
@@ -935,7 +1073,12 @@ def reset_conversation():
         make_ai_message(INITIAL_ASSISTANT_MESSAGE),
     ]
 
-    log_monitor_event("session_start", "system", "New participant session started", phase="BEHAVIOR")
+    record_session_start(st.session_state.session_id)
+    record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
+    try:
+        save_session_transcript_to_drive(st.session_state.session_id)
+    except Exception:
+        pass
     st.session_state.session_started_logged = True
 
 
@@ -945,6 +1088,12 @@ def initialize_session_state():
 
     if "session_id" not in st.session_state:
         st.session_state.session_id = uuid.uuid4().hex
+        record_session_start(st.session_state.session_id)
+        record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
+        try:
+            save_session_transcript_to_drive(st.session_state.session_id)
+        except Exception:
+            pass
 
     if "ac_kickoff_sent" not in st.session_state:
         st.session_state.ac_kickoff_sent = False
@@ -956,7 +1105,6 @@ def initialize_session_state():
         st.session_state.session_started_logged = False
 
     if not st.session_state.session_started_logged:
-        log_monitor_event("session_start", "system", "New participant session started", phase=st.session_state.phase)
         st.session_state.session_started_logged = True
 
     if "messages" not in st.session_state:
@@ -998,7 +1146,11 @@ def advance_phase_after_handoff(clean_text: str):
             kickoff_msg = make_ai_message(message_text)
             kickoff_msg.additional_kwargs["phase"] = "AC"
             st.session_state.messages.append(kickoff_msg)
-            log_monitor_event("message", "assistant", message_text, phase="AC")
+            record_message(st.session_state.session_id, "assistant", message_text, "AC")
+            try:
+                save_session_transcript_to_drive(st.session_state.session_id)
+            except Exception:
+                pass
 
     elif current_phase == "AC":
         st.session_state.phase = "STRATEGY"
@@ -1011,7 +1163,11 @@ def advance_phase_after_handoff(clean_text: str):
             kickoff_msg = make_ai_message(message_text)
             kickoff_msg.additional_kwargs["phase"] = "STRATEGY"
             st.session_state.messages.append(kickoff_msg)
-            log_monitor_event("message", "assistant", message_text, phase="STRATEGY")
+            record_message(st.session_state.session_id, "assistant", message_text, "STRATEGY")
+            try:
+                save_session_transcript_to_drive(st.session_state.session_id)
+            except Exception:
+                pass
 
     else:
         completion_msg = make_ai_message(
@@ -1019,14 +1175,19 @@ def advance_phase_after_handoff(clean_text: str):
         )
         completion_msg.additional_kwargs["phase"] = "STRATEGY"
         st.session_state.messages.append(completion_msg)
-        log_monitor_event("message", "assistant", "You have completed the ABC problem solving plan.", phase="STRATEGY")
+        record_message(st.session_state.session_id, "assistant", "You have completed the ABC problem solving plan.", "STRATEGY")
+        try:
+            save_session_transcript_to_drive(st.session_state.session_id)
+        except Exception:
+            pass
 
 
 def run_llm_and_update_conversation(user_text: str):
+    init_session_for_participant()
     user_msg = make_human_message(user_text)
     user_msg.additional_kwargs["phase"] = st.session_state.phase
     st.session_state.messages.append(user_msg)
-    log_monitor_event("message", "user", user_text, phase=st.session_state.phase)
+    record_message(st.session_state.session_id, "user", user_text, st.session_state.phase)
 
     llm = ChatOpenAI(
         model=MODEL_NAME,
@@ -1043,7 +1204,12 @@ def run_llm_and_update_conversation(user_text: str):
         assistant_msg = make_ai_message(assistant_text)
         assistant_msg.additional_kwargs["phase"] = st.session_state.phase
         st.session_state.messages.append(assistant_msg)
-        log_monitor_event("message", "assistant", assistant_text, phase=st.session_state.phase)
+        record_message(st.session_state.session_id, "assistant", assistant_text, st.session_state.phase)
+
+    try:
+        save_session_transcript_to_drive(st.session_state.session_id)
+    except Exception:
+        pass
 
 def upload_excel_to_drive(excel_data, file_name):
     credentials = service_account.Credentials.from_service_account_info(
