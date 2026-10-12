@@ -1,7 +1,6 @@
 import os
 import sqlite3
 
-import pandas as pd
 import streamlit as st
 
 
@@ -64,7 +63,6 @@ def get_errors_for_session(session_id: str):
 
 
 def validate_researcher():
-    username = st.secrets.get("RESEARCHER_USERNAME") or st.secrets.get("researcher_username")
     password = st.secrets.get("RESEARCHER_PASSWORD") or st.secrets.get("researcher_password")
 
     if "researcher_authenticated" not in st.session_state:
@@ -73,20 +71,31 @@ def validate_researcher():
     if st.session_state.researcher_authenticated:
         return True
 
-    st.sidebar.subheader("Researcher access")
-    entered_user = st.sidebar.text_input("Username", key="researcher_user")
-    entered_password = st.sidebar.text_input("Password", type="password", key="researcher_pass")
+    st.set_page_config(page_title="STAR-C Research Dashboard", layout="wide")
+    st.title("Researcher dashboard")
+    entered_password = st.text_input("Researcher password", type="password", key="researcher_pass")
+    login_clicked = st.button("Log in")
 
-    if entered_user and entered_password and entered_user == username and entered_password == password:
-        st.session_state.researcher_authenticated = True
-        return True
+    if login_clicked:
+        if entered_password and password and entered_password == password:
+            st.session_state.researcher_authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+            st.stop()
 
-    st.sidebar.warning("Access restricted to authorized researchers.")
+    st.warning("Access restricted to authorized researchers.")
     st.stop()
+
+    return False
 
 
 st.set_page_config(page_title="STAR-C Research Dashboard", layout="wide")
 validate_researcher()
+
+if st.sidebar.button("Log out"):
+    st.session_state.researcher_authenticated = False
+    st.rerun()
 
 
 @st.fragment(run_every=5)
@@ -102,8 +111,7 @@ def dashboard_page():
         for s in sessions
     ]
 
-    default_index = 0
-    selected_label = st.selectbox("Select participant session", session_labels, index=default_index, key="selected_session_label")
+    selected_label = st.selectbox("Select participant session", session_labels, index=0, key="selected_session_label")
     selected_id = selected_label.split(" | ", 1)[0]
 
     selected_session = next((s for s in sessions if s["session_id"] == selected_id), sessions[0])
