@@ -91,6 +91,11 @@ def validate_researcher():
 
 
 st.set_page_config(page_title="STAR-C Research Dashboard", layout="wide")
+
+header_col, right_col = st.columns([6, 1])
+with right_col:
+    st.page_link("3_agent_gpt_CAREGIVERS.py", label="Back to Chatbot")
+
 validate_researcher()
 
 if st.sidebar.button("Log out"):
