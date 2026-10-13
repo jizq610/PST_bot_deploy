@@ -156,8 +156,8 @@ validate_researcher()
 
 header_col, right_col = st.columns([6, 1])
 
-with right_col:
-    st.markdown("[← Back to Chatbot](/chatbot)")
+# with right_col:
+#     st.markdown("[← Back to Chatbot](/chatbot)")
 
 if st.sidebar.button("Log out"):
     st.session_state.researcher_authenticated = False
