@@ -5,7 +5,8 @@ import os
 import sqlite3
 import uuid
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 import pandas as pd
@@ -78,10 +79,14 @@ def init_monitoring_db():
                 session_id TEXT PRIMARY KEY,
                 started_at TEXT NOT NULL,
                 last_activity TEXT NOT NULL,
-                status TEXT DEFAULT 'active'
+                status TEXT DEFAULT 'active',
+                drive_file_id TEXT
             )
             """
         )
+        columns = conn.execute("PRAGMA table_info(sessions)").fetchall()
+        if not any(col[1] == "drive_file_id" for col in columns):
+            conn.execute("ALTER TABLE sessions ADD COLUMN drive_file_id TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
@@ -172,9 +177,45 @@ def find_drive_file(service, file_name: str):
     return files[0] if files else None
 
 
+def set_session_drive_file_id(session_id: str, drive_file_id: str):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE sessions SET drive_file_id = ? WHERE session_id = ?",
+            (drive_file_id, session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_session_file_name(session_id: str) -> str:
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT started_at FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        raise ValueError(f"No session found for {session_id}")
+
+    started_at = datetime.strptime(row["started_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    pacific = started_at.astimezone(ZoneInfo("America/Los_Angeles"))
+    tz_label = "PDT" if pacific.dst() else "PST"
+    filename = pacific.strftime("%Y-%m-%d_%H-%M-%S")
+    return f"{filename}_{tz_label}_{session_id}.xlsx"
+
+
 def save_session_transcript_to_drive(session_id: str):
     try:
         conn = get_db_connection()
+        session_row = conn.execute(
+            "SELECT drive_file_id FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
         rows = conn.execute(
             "SELECT created_at, role, phase, content FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
@@ -184,29 +225,50 @@ def save_session_transcript_to_drive(session_id: str):
         if not rows:
             return
 
+        drive_file_id = session_row["drive_file_id"] if session_row and session_row["drive_file_id"] else None
         chat_df = pd.DataFrame(rows, columns=["timestamp", "role", "phase", "content"])
         chat_df["session_id"] = session_id
-        ratings_df = ratings_to_dataframe(st.session_state.get("ratings", {}))
 
-        excel_bytes = dataframe_to_excel_bytes(chat_df, ratings_df)
+        excel_bytes = dataframe_to_excel_bytes(chat_df)
         service = get_drive_service()
-        file_name = f"STAR-C_session_{session_id}.xlsx"
+
+        if drive_file_id:
+            service.files().update(
+                fileId=drive_file_id,
+                media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
+                supportsAllDrives=True,
+            ).execute()
+            return
+
+        file_name = get_session_file_name(session_id)
         existing_file = find_drive_file(service, file_name)
 
         if existing_file:
+            drive_file_id = existing_file["id"]
+            set_session_drive_file_id(session_id, drive_file_id)
             service.files().update(
-                fileId=existing_file["id"],
+                fileId=drive_file_id,
                 media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
                 supportsAllDrives=True,
             ).execute()
-        else:
-            file_metadata = {"name": file_name, "parents": [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]}
-            service.files().create(
-                body=file_metadata,
-                media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
-                fields="id, name",
-                supportsAllDrives=True,
-            ).execute()
+            return
+
+        file_metadata = {"name": file_name, "parents": [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]}
+        created_file = service.files().create(
+            body=file_metadata,
+            media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
+            fields="id, name",
+            supportsAllDrives=True,
+        ).execute()
+
+        drive_file_id = created_file.get("id")
+        if not drive_file_id:
+            recovered_file = find_drive_file(service, file_name)
+            if recovered_file is None:
+                raise RuntimeError(f"Create response missing file ID for session {session_id}; backup could not be recovered.")
+            drive_file_id = recovered_file["id"]
+
+        set_session_drive_file_id(session_id, drive_file_id)
     except Exception as exc:
         record_monitoring_error(session_id, f"Drive backup failed: {exc}")
         raise
@@ -344,19 +406,11 @@ def study_id_to_dataframe():
         ]
     )
 
-def dataframe_to_excel_bytes(chat_df, ratings_df):
+def dataframe_to_excel_bytes(chat_df, ratings_df=None):
     output = BytesIO()
-
-    sidebar_df = sidebar_status_to_dataframe()
-    persona_df = persona_description_to_dataframe()
-    study_id_df = study_id_to_dataframe()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         chat_df.to_excel(writer, index=False, sheet_name="chat_history")
-        ratings_df.to_excel(writer, index=False, sheet_name="ratings")
-        sidebar_df.to_excel(writer, index=False, sheet_name="sidebar_status")
-        persona_df.to_excel(writer, index=False, sheet_name="persona_description")
-        study_id_df.to_excel(writer, index=False, sheet_name="study_id")
 
     return output.getvalue()
 
