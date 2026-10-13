@@ -71,7 +71,6 @@ def validate_researcher():
     if st.session_state.researcher_authenticated:
         return True
 
-    st.set_page_config(page_title="STAR-C Research Dashboard", layout="wide")
     st.title("Researcher dashboard")
     entered_password = st.text_input("Researcher password", type="password", key="researcher_pass")
     login_clicked = st.button("Log in")
@@ -91,12 +90,12 @@ def validate_researcher():
 
 
 st.set_page_config(page_title="STAR-C Research Dashboard", layout="wide")
+validate_researcher()
 
 header_col, right_col = st.columns([6, 1])
 with right_col:
-    st.page_link(st.session_state["chatbot_page"], label="Back to Chatbot")
+    st.markdown("[← Back to Chatbot](/chatbot)")
 
-validate_researcher()
 
 if st.sidebar.button("Log out"):
     st.session_state.researcher_authenticated = False
