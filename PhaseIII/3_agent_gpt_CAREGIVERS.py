@@ -173,8 +173,6 @@ def find_drive_file(service, file_name: str):
 
 
 def save_session_transcript_to_drive(session_id: str):
-    initialize_session_state()
-
     try:
         conn = get_db_connection()
         rows = conn.execute(
@@ -388,15 +386,6 @@ def initialize_session_state():
     if "phase" not in st.session_state:
         st.session_state.phase = "BEHAVIOR"
 
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = uuid.uuid4().hex
-        record_session_start(st.session_state.session_id)
-        record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
-        try:
-            save_session_transcript_to_drive(st.session_state.session_id)
-        except Exception:
-            pass
-
     if "ac_kickoff_sent" not in st.session_state:
         st.session_state.ac_kickoff_sent = False
 
@@ -405,9 +394,6 @@ def initialize_session_state():
 
     if "session_started_logged" not in st.session_state:
         st.session_state.session_started_logged = False
-
-    if not st.session_state.session_started_logged:
-        st.session_state.session_started_logged = True
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
@@ -426,6 +412,19 @@ def initialize_session_state():
 
     if "study_id" not in st.session_state:
         st.session_state.study_id = ""
+
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = uuid.uuid4().hex
+        record_session_start(st.session_state.session_id)
+        record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
+        try:
+            save_session_transcript_to_drive(st.session_state.session_id)
+        except Exception:
+            pass
+        st.session_state.session_started_logged = True
+
+    if not st.session_state.session_started_logged:
+        st.session_state.session_started_logged = True
 
 
 def set_message_phase_metadata(message):
@@ -585,8 +584,8 @@ def chatbot_page():
 
 st.navigation(
     [
-        st.Page(chatbot_page, title="Chatbot", default=True),
-        st.Page("pages/dashboard.py", title="Dashboard"),
+        st.Page(chatbot_page, title="Chatbot", url_path="chatbot", default=True),
+        st.Page("pages/dashboard.py", title="Dashboard", url_path="dashboard"),
     ],
     position="hidden",
 ).run()
