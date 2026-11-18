@@ -35,7 +35,7 @@ STRATEGY_PROMPT = load_prompt("strategy_prompt.txt")
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "gpt-5-mini"
+MODEL_NAME = "gpt-5-nano"
 
 # Set ENABLE_FULL_API_RESPONSE_LOGGING=true only for short debugging sessions.
 # This keeps raw OpenAI response JSON local to SQLite for researcher debugging without
@@ -599,7 +599,7 @@ def run_llm_and_update_conversation(user_text: str):
     response = client.responses.create(
         model=MODEL_NAME,
         input=api_messages,
-        reasoning={"effort": "low", "summary": "auto"},
+        reasoning={"effort": "minimal", "summary": "auto"},
     )
 
     api_response_json = serialize_api_response(response) if ENABLE_FULL_API_RESPONSE_LOGGING else None
