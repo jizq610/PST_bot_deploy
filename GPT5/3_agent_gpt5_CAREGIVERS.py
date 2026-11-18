@@ -35,7 +35,7 @@ STRATEGY_PROMPT = load_prompt("strategy_prompt.txt")
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "gpt-5-nano"
+MODEL_NAME = "gpt-5-mini"
 
 # Set ENABLE_FULL_API_RESPONSE_LOGGING=true only for short debugging sessions.
 # This keeps raw OpenAI response JSON local to SQLite for researcher debugging without
