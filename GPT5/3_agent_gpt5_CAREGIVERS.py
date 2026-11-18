@@ -599,7 +599,7 @@ def run_llm_and_update_conversation(user_text: str):
     response = client.responses.create(
         model=MODEL_NAME,
         input=api_messages,
-        reasoning={"effort": "minimal", "summary": "auto"},
+        reasoning={"effort": "low", "summary": "auto"},
     )
 
     api_response_json = serialize_api_response(response) if ENABLE_FULL_API_RESPONSE_LOGGING else None
