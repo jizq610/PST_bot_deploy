@@ -33,7 +33,7 @@ STRATEGY_PROMPT = load_prompt("strategy_prompt.txt")
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "gpt-5-nano"
+MODEL_NAME = "gpt-5-mini"
 REASONING_EFFORT = "low"
 
 INITIAL_ASSISTANT_MESSAGE = (
@@ -315,12 +315,6 @@ def get_system_prompt_for_phase(phase: str) -> str:
         "STRATEGY": STRATEGY_PROMPT,
     }[phase]
 
-def get_kickoff_message_for_phase(phase: str) -> str:
-    return {
-        "AC": "Now let’s look at what happens before and after the behavior. In addition to what we've discussed so far, any thoughts that come to your mind?",
-        "STRATEGY": "Now let's think about strategies. What can we change before or (what happens) after the behavior to see if it makes a difference going forward?",
-    }[phase]
-
 def make_ai_message(content: str, model_name: str = MODEL_NAME) -> AIMessage:
     return AIMessage(
         content=content,
@@ -385,8 +379,6 @@ def sidebar_status_to_dataframe():
         [
             {"field": "current_phase", "value": st.session_state.phase},
             {"field": "current_stage_label", "value": phase_label(st.session_state.phase)},
-            {"field": "ac_kickoff_sent", "value": st.session_state.ac_kickoff_sent},
-            {"field": "strategy_kickoff_sent", "value": st.session_state.strategy_kickoff_sent},
         ]
     )
 
@@ -418,8 +410,6 @@ def dataframe_to_excel_bytes(chat_df, ratings_df=None):
 
 def reset_conversation():
     st.session_state.phase = "BEHAVIOR"
-    st.session_state.ac_kickoff_sent = False
-    st.session_state.strategy_kickoff_sent = False
     st.session_state.session_id = uuid.uuid4().hex
     st.session_state.session_started_logged = False
 
@@ -437,14 +427,14 @@ def initialize_session_state():
     if "phase" not in st.session_state:
         st.session_state.phase = "BEHAVIOR"
 
-    if "ac_kickoff_sent" not in st.session_state:
-        st.session_state.ac_kickoff_sent = False
-
-    if "strategy_kickoff_sent" not in st.session_state:
-        st.session_state.strategy_kickoff_sent = False
-
     if "session_started_logged" not in st.session_state:
         st.session_state.session_started_logged = False
+        
+    if "is_processing" not in st.session_state:
+        st.session_state.is_processing = False
+
+    if "pending_user_message" not in st.session_state:
+        st.session_state.pending_user_message = None
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
@@ -479,37 +469,24 @@ def set_message_phase_metadata(message):
         message.additional_kwargs["phase"] = st.session_state.phase
     return message
 
-def advance_phase_after_handoff(clean_text: str):
-    current_phase = st.session_state.phase
-
-    if current_phase == "BEHAVIOR":
-        next_phase = "AC"
-        kickoff_flag = "ac_kickoff_sent"
-    elif current_phase == "AC":
-        next_phase = "STRATEGY"
-        kickoff_flag = "strategy_kickoff_sent"
-    else:
-        return "You have completed the ABC problem solving plan.\n\nHANDOFF_READY"
+def advance_phase_after_handoff() -> bool:
+    """Change the active agent without inserting a scripted kickoff message."""
+    next_phase = {
+        "BEHAVIOR": "AC",
+        "AC": "STRATEGY",
+    }.get(st.session_state.phase)
+    if next_phase is None:
+        return False
 
     st.session_state.phase = next_phase
-    st.session_state.messages[0] = SystemMessage(content=get_system_prompt_for_phase(next_phase))
-    if st.session_state[kickoff_flag]:
-        return None
-
-    st.session_state[kickoff_flag] = True
-    kickoff_text = get_kickoff_message_for_phase(next_phase)
-    return f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
+    st.session_state.messages[0] = SystemMessage(
+        content=get_system_prompt_for_phase(next_phase)
+    )
+    return True
 
 
-def run_llm_and_update_conversation(user_text: str):
-    initialize_session_state()
-    session_id = st.session_state.session_id
-    phase = st.session_state.phase
-    user_msg = make_human_message(user_text)
-    user_msg.additional_kwargs["phase"] = phase
-    st.session_state.messages.append(user_msg)
-    record_message(session_id, "user", user_text, phase)
-
+def build_api_messages():
+    """Convert the conversation to Responses API input for the active agent."""
     api_messages = []
     for message in st.session_state.messages:
         if isinstance(message, SystemMessage):
@@ -521,18 +498,12 @@ def run_llm_and_update_conversation(user_text: str):
         else:
             continue
         api_messages.append({"role": role, "content": str(message.content)})
+    return api_messages
 
-    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
-    with OpenAI(api_key=api_key) as client:
-        response = client.responses.create(
-            model=MODEL_NAME,
-            input=api_messages,
-            reasoning={"effort": REASONING_EFFORT, "summary": "auto"},
-            store=False,
-        )
 
-    # API-provided summary from the same response that produced the caregiver reply.
-    reasoning_summary = "\n".join(
+def extract_reasoning_summary(response) -> str:
+    """Preserve the existing same-response reasoning-summary extraction."""
+    return "\n".join(
         part.text
         for item in response.output
         if item.type == "reasoning"
@@ -540,30 +511,82 @@ def run_llm_and_update_conversation(user_text: str):
         if part.type == "summary_text"
     ).strip()
 
-    assistant_text = (response.output_text or "").strip()
-    if not assistant_text:
-        raise RuntimeError(f"{MODEL_NAME} returned no caregiver-facing text.")
 
-    if "HANDOFF_READY" in assistant_text:
-        assistant_text = advance_phase_after_handoff(assistant_text.replace("HANDOFF_READY", "").strip())
+def run_llm_and_update_conversation(user_text: str):
+    initialize_session_state()
+    session_id = st.session_state.session_id
+    original_phase = st.session_state.phase
 
-    backup_executor = get_backup_executor()
-    drive_settings = get_drive_settings()
-    if assistant_text is None:
-        backup_executor.submit(save_session_transcript_to_drive, session_id, drive_settings)
-        return
+    user_msg = make_human_message(user_text)
+    user_msg.additional_kwargs["phase"] = original_phase
+    st.session_state.messages.append(user_msg)
+    record_message(session_id, "user", user_text, original_phase)
+
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    response = None
+    assistant_text = None
+    reasoning_summary = ""
+
+    with OpenAI(api_key=api_key) as client:
+        # Maximum two handoffs: BEHAVIOR -> AC -> STRATEGY.
+        # Each handoff generates a fresh reply from the incoming agent.
+        for handoff_count in range(3):
+            api_messages = build_api_messages()
+            if handoff_count > 0:
+                # Ephemeral developer instruction: not a caregiver turn,
+                # and never stored in the chat history or transcript.
+                api_messages.append({
+                    "role": "developer",
+                    "content": (
+                        "The preceding agent has finished its assigned work. "
+                        "You are continuing the existing caregiver conversation. "
+                        "Generate your first caregiver-facing response now. "
+                        "Connect naturally to what the caregiver has already shared, "
+                        "avoid repeating questions, and follow your current phase "
+                        "instructions. Ask only one relevant question. "
+                        "Do not mention agents, handoffs, or phases."
+                    ),
+                })
+
+            response = client.responses.create(
+                model=MODEL_NAME,
+                input=api_messages,
+                reasoning={"effort": REASONING_EFFORT, "summary": "auto"},
+                store=False,
+            )
+            assistant_text = (response.output_text or "").strip()
+            if not assistant_text:
+                raise RuntimeError(
+                    f"{MODEL_NAME} returned an empty response in {st.session_state.phase}."
+                )
+
+            if "HANDOFF_READY" not in assistant_text:
+                reasoning_summary = extract_reasoning_summary(response)
+                break
+
+            if not advance_phase_after_handoff():
+                # Final agent completed the ABC plan; no fourth agent exists.
+                assistant_text = (
+                    assistant_text.replace("HANDOFF_READY", "").strip()
+                    or "You have completed the ABC problem solving plan."
+                )
+                reasoning_summary = extract_reasoning_summary(response)
+                break
+        else:
+            # Never expose internal control tokens or silently continue a loop.
+            raise RuntimeError("Exceeded the maximum number of agent handoffs.")
 
     posted_phase = st.session_state.phase
     assistant_msg = make_ai_message(assistant_text)
     assistant_msg.additional_kwargs["phase"] = posted_phase
     st.session_state.messages.append(assistant_msg)
-
-    posted_reply = assistant_text.replace("HANDOFF_READY", "").strip()
     record_message(
-        session_id, "assistant", posted_reply, posted_phase,
+        session_id, "assistant", assistant_text, posted_phase,
         reasoning_summary=reasoning_summary or None,
     )
-    backup_executor.submit(save_session_transcript_to_drive, session_id, drive_settings)
+    get_backup_executor().submit(
+        save_session_transcript_to_drive, session_id, get_drive_settings()
+    )
 
 
 def upload_excel_to_drive(excel_data, file_name):
@@ -598,6 +621,65 @@ def upload_excel_to_drive(excel_data, file_name):
 
     return uploaded_file
 
+caregiver_chat_input = st.components.v2.component(
+    "caregiver_chat_input",
+    html="""
+        <form>
+            <textarea aria-label="Chat message" rows="2"></textarea>
+            <button type="submit">Send</button>
+        </form>
+    """,
+    css="""
+        form { display: flex; gap: 0.5rem; align-items: flex-end; }
+        textarea, button {
+            font: inherit;
+            color: var(--st-text-color);
+            background: var(--st-secondary-background-color);
+            border: 1px solid var(--st-border-color);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+        }
+        textarea { flex: 1; min-width: 0; resize: vertical; }
+        :focus-visible { outline: 2px solid var(--st-primary-color); }
+        :disabled { opacity: 0.6; }
+    """,
+    js="""
+        export default function ({ parentElement, data, setTriggerValue }) {
+            const form = parentElement.querySelector("form");
+            const input = form.querySelector("textarea");
+            const send = form.querySelector("button");
+
+            if (data.disabled || data.focusToken) delete form.dataset.submitted;
+            const locked = data.disabled || form.dataset.submitted === "true";
+            input.disabled = send.disabled = locked;
+            input.placeholder = locked ? "Please wait for the assistant..." : "Type your message...";
+
+            if (!locked && data.focusToken && input.dataset.focusToken !== data.focusToken) {
+                input.dataset.focusToken = data.focusToken;
+                input.focus({ preventScroll: true });
+            }
+
+            form.onsubmit = event => {
+                event.preventDefault();
+                const message = input.value;
+                if (input.disabled || !message.trim()) return;
+                form.dataset.submitted = "true";
+                input.value = "";
+                input.disabled = send.disabled = true;
+                input.placeholder = "Please wait for the assistant...";
+                setTriggerValue("submitted", message);
+            };
+            input.onkeydown = event => {
+                if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+                    event.preventDefault();
+                    form.requestSubmit();
+                }
+            };
+        }
+    """,
+)
+
+
 def chatbot_page():
     st.set_page_config(page_title="STAR-C Virtual Assistant", layout="wide", initial_sidebar_state="collapsed")
     st.markdown("## **STAR-C Virtual Assistant**")
@@ -621,16 +703,50 @@ def chatbot_page():
                 st.markdown(m.content)
 
         live_chat_area = st.empty()
-    user_text = st.chat_input("Type your message...")
+    error_area = st.empty()
+    if error := st.session_state.get("chat_generation_error"):
+        error_area.error(error)
 
-    if user_text:
-        with live_chat_area.container():
-            with st.chat_message("user"):
-                st.markdown(user_text)
+    processing = st.session_state.is_processing
+    focus_token = None if processing else st.session_state.pop("chat_focus_token", None)
+    user_text = caregiver_chat_input(
+        key="caregiver_chat_input",
+        data={"disabled": processing, "focusToken": focus_token},
+        on_submitted_change=lambda: None,
+    ).submitted
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    run_llm_and_update_conversation(user_text)
+    if user_text and not st.session_state.is_processing:
+        st.session_state.pending_user_message = user_text
+        st.session_state.is_processing = True
+        st.session_state.pop("chat_generation_error", None)
+        st.rerun()
+
+    pending_message = st.session_state.pending_user_message
+    if (
+        st.session_state.is_processing
+        and pending_message
+        and not st.session_state.get("pending_message_started")
+    ):
+        # Claim the submission before generation so a rerun cannot process it again.
+        st.session_state.pending_message_started = True
+        try:
+            with live_chat_area.container():
+                with st.chat_message("user"):
+                    st.markdown(pending_message)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        run_llm_and_update_conversation(pending_message)
+
+        except Exception:
+            st.session_state.chat_generation_error = (
+                "The assistant couldn’t generate a reply. You can continue the conversation below."
+            )
+        finally:
+            st.session_state.pending_user_message = None
+            st.session_state.pending_message_started = False
+            st.session_state.is_processing = False
+            st.session_state.chat_focus_token = uuid.uuid4().hex
 
         st.rerun()
 
