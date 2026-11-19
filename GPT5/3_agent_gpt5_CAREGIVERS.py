@@ -1,9 +1,7 @@
-# GPT is model 1 gpt-4o-mini
- 
-import json
 import os
 import sqlite3
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -35,12 +33,8 @@ STRATEGY_PROMPT = load_prompt("strategy_prompt.txt")
 # -------------------------------------------------
 # Constants
 # -------------------------------------------------
-MODEL_NAME = "gpt-5-mini"
-
-# Set ENABLE_FULL_API_RESPONSE_LOGGING=true only for short debugging sessions.
-# This keeps raw OpenAI response JSON local to SQLite for researcher debugging without
-# exposing it in the caregiver UI or exporting it to Excel/Google Drive.
-ENABLE_FULL_API_RESPONSE_LOGGING = str(os.getenv("ENABLE_FULL_API_RESPONSE_LOGGING", "false")).strip().lower() in {"1", "true", "yes", "on"}
+MODEL_NAME = "gpt-5-nano"
+REASONING_EFFORT = "low"
 
 INITIAL_ASSISTANT_MESSAGE = (
     "Hello, I’m glad you’re here. To get started, could you briefly share your caregiving situation with me? "
@@ -71,9 +65,11 @@ def get_db_connection():
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
+@st.cache_resource
 def init_monitoring_db():
     conn = get_db_connection()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -98,15 +94,15 @@ def init_monitoring_db():
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 reasoning_summary TEXT,
-                api_response_json TEXT
+                api_response_json TEXT,
+                research_review_status TEXT
             )
             """
         )
         message_columns = {col[1] for col in conn.execute("PRAGMA table_info(messages)").fetchall()}
-        if "reasoning_summary" not in message_columns:
-            conn.execute("ALTER TABLE messages ADD COLUMN reasoning_summary TEXT")
-        if "api_response_json" not in message_columns:
-            conn.execute("ALTER TABLE messages ADD COLUMN api_response_json TEXT")
+        for column in ("reasoning_summary", "api_response_json", "research_review_status"):
+            if column not in message_columns:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS monitoring_errors (
@@ -144,33 +140,36 @@ def record_session_start(session_id: str):
     finally:
         conn.close()
 
-def record_message(session_id: str, role: str, content: str, phase: str = "", reasoning_summary: str = "", api_response_json: str = None):
+def record_message(session_id: str, role: str, content: str, phase: str = "", *, reasoning_summary: str = None):
     if not content or not content.strip():
         return
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     conn = get_db_connection()
     try:
-        conn.execute(
-            "INSERT INTO messages (session_id, role, phase, content, created_at, reasoning_summary, api_response_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session_id, role, phase, content.strip(), now, reasoning_summary or "", api_response_json if api_response_json else None),
+        message = conn.execute(
+            """
+            INSERT INTO messages (session_id, role, phase, content, created_at, reasoning_summary)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, role, phase, content.strip(), now, reasoning_summary),
         )
         conn.execute(
             "UPDATE sessions SET last_activity = ? WHERE session_id = ?",
             (now, session_id),
         )
         conn.commit()
+        return message.lastrowid
     finally:
         conn.close()
 
-def get_drive_service():
+def get_drive_service(service_account_info):
     credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
+        service_account_info,
         scopes=["https://www.googleapis.com/auth/drive.file"],
     )
     return build("drive", "v3", credentials=credentials)
 
-def find_drive_file(service, file_name: str):
-    folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+def find_drive_file(service, file_name: str, folder_id: str):
     response = service.files().list(
         q=f"name='{file_name}' and '{folder_id}' in parents and trashed=false",
         fields="files(id, name)",
@@ -209,28 +208,41 @@ def get_session_file_name(session_id: str) -> str:
     filename = pacific.strftime("%Y-%m-%d_%H-%M-%S")
     return f"{filename}_{tz_label}_{session_id}.xlsx"
 
-def save_session_transcript_to_drive(session_id: str):
+def save_session_transcript_to_drive(session_id: str, drive_settings):
     try:
+        if drive_settings is None:
+            raise RuntimeError("Google Drive credentials or folder ID are missing.")
+        service_account_info, folder_id = drive_settings
+
         conn = get_db_connection()
-        session_row = conn.execute(
-            "SELECT drive_file_id FROM sessions WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        rows = conn.execute(
-            "SELECT created_at, role, phase, content, reasoning_summary FROM messages WHERE session_id = ? ORDER BY id",
-            (session_id,),
-        ).fetchall()
-        conn.close()
+        try:
+            session_row = conn.execute(
+                "SELECT drive_file_id FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT created_at AS timestamp, role, phase, content,
+                       CASE WHEN research_review_status IS NULL THEN reasoning_summary ELSE NULL END AS reasoning_summary,
+                       session_id
+                FROM messages WHERE session_id = ? ORDER BY id
+                """,
+                (session_id,),
+            ).fetchall()
+        finally:
+            conn.close()
 
         if not rows:
             return
 
         drive_file_id = session_row["drive_file_id"] if session_row and session_row["drive_file_id"] else None
-        chat_df = pd.DataFrame(rows, columns=["timestamp", "role", "phase", "content", "reasoning_summary"])
-        chat_df["session_id"] = session_id
+        chat_df = pd.DataFrame(
+            [dict(row) for row in rows],
+            columns=["timestamp", "role", "phase", "content", "reasoning_summary", "session_id"],
+        )
 
         excel_bytes = dataframe_to_excel_bytes(chat_df)
-        service = get_drive_service()
+        service = get_drive_service(service_account_info)
 
         if drive_file_id:
             service.files().update(
@@ -241,7 +253,7 @@ def save_session_transcript_to_drive(session_id: str):
             return
 
         file_name = get_session_file_name(session_id)
-        existing_file = find_drive_file(service, file_name)
+        existing_file = find_drive_file(service, file_name, folder_id)
 
         if existing_file:
             drive_file_id = existing_file["id"]
@@ -253,7 +265,7 @@ def save_session_transcript_to_drive(session_id: str):
             ).execute()
             return
 
-        file_metadata = {"name": file_name, "parents": [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]}
+        file_metadata = {"name": file_name, "parents": [folder_id]}
         created_file = service.files().create(
             body=file_metadata,
             media_body=MediaIoBaseUpload(BytesIO(excel_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=False),
@@ -263,7 +275,7 @@ def save_session_transcript_to_drive(session_id: str):
 
         drive_file_id = created_file.get("id")
         if not drive_file_id:
-            recovered_file = find_drive_file(service, file_name)
+            recovered_file = find_drive_file(service, file_name, folder_id)
             if recovered_file is None:
                 raise RuntimeError(f"Create response missing file ID for session {session_id}; backup could not be recovered.")
             drive_file_id = recovered_file["id"]
@@ -271,19 +283,19 @@ def save_session_transcript_to_drive(session_id: str):
         set_session_drive_file_id(session_id, drive_file_id)
     except Exception as exc:
         record_monitoring_error(session_id, f"Drive backup failed: {exc}")
-        raise
 
-def init_session_for_participant():
-    initialize_session_state()
 
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = uuid.uuid4().hex
-        record_session_start(st.session_state.session_id)
-        record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
-        try:
-            save_session_transcript_to_drive(st.session_state.session_id)
-        except Exception:
-            pass
+def get_drive_settings():
+    try:
+        return dict(st.secrets["gcp_service_account"]), st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+    except (KeyError, FileNotFoundError):
+        return None
+
+
+@st.cache_resource
+def get_backup_executor():
+    # Serial writes keep older transcript snapshots from overwriting newer ones.
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="drive-backup")
 
 init_monitoring_db()
 
@@ -418,10 +430,7 @@ def reset_conversation():
 
     record_session_start(st.session_state.session_id)
     record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
-    try:
-        save_session_transcript_to_drive(st.session_state.session_id)
-    except Exception:
-        pass
+    get_backup_executor().submit(save_session_transcript_to_drive, st.session_state.session_id, get_drive_settings())
     st.session_state.session_started_logged = True
 
 def initialize_session_state():
@@ -459,10 +468,7 @@ def initialize_session_state():
         st.session_state.session_id = uuid.uuid4().hex
         record_session_start(st.session_state.session_id)
         record_message(st.session_state.session_id, "assistant", INITIAL_ASSISTANT_MESSAGE, "BEHAVIOR")
-        try:
-            save_session_transcript_to_drive(st.session_state.session_id)
-        except Exception:
-            pass
+        get_backup_executor().submit(save_session_transcript_to_drive, st.session_state.session_id, get_drive_settings())
         st.session_state.session_started_logged = True
 
     if not st.session_state.session_started_logged:
@@ -473,116 +479,37 @@ def set_message_phase_metadata(message):
         message.additional_kwargs["phase"] = st.session_state.phase
     return message
 
-def extract_reasoning_summary(response) -> str:
-    try:
-        if not response:
-            print("DIAGNOSTIC: no response object returned from OpenAI")
-            return ""
-
-        payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else response
-        summary_parts = []
-
-        def walk(node):
-            if node is None:
-                return
-            if isinstance(node, dict):
-                if node.get("type") == "summary_text" and isinstance(node.get("text"), str) and node.get("text").strip():
-                    summary_parts.append(node["text"].strip())
-                for value in node.values():
-                    walk(value)
-            elif isinstance(node, (list, tuple)):
-                for item in node:
-                    walk(item)
-            elif hasattr(node, "model_dump"):
-                try:
-                    walk(node.model_dump(mode="json"))
-                except Exception:
-                    pass
-
-        walk(payload)
-        summary = "\n\n".join(summary_parts).strip()
-
-        if summary:
-            print("DIAGNOSTIC: reasoning summary present in OpenAI response")
-            return summary
-
-        if isinstance(payload, dict) and payload.get("output"):
-            print("DIAGNOSTIC: API response had output items but no reasoning summary text was found")
-        else:
-            print("DIAGNOSTIC: API response lacked any reasoning summary payload")
-        return ""
-    except Exception as exc:
-        print(f"DIAGNOSTIC: failed to extract OpenAI reasoning summary: {exc}")
-        return ""
-
-def serialize_api_response(response) -> str:
-    try:
-        payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else response
-        return json.dumps(payload, indent=2, ensure_ascii=False, default=str)
-    except Exception as exc:
-        print(f"DIAGNOSTIC: failed to serialize OpenAI response: {exc}")
-        try:
-            return json.dumps(response, indent=2, ensure_ascii=False, default=str)
-        except Exception:
-            return str(response)
-
-def advance_phase_after_handoff(clean_text: str, reasoning_summary: str = "", api_response_json: str = ""):
+def advance_phase_after_handoff(clean_text: str):
     current_phase = st.session_state.phase
 
     if current_phase == "BEHAVIOR":
-        st.session_state.phase = "AC"
-        st.session_state.messages[0] = SystemMessage(content=get_system_prompt_for_phase("AC"))
-
-        if not st.session_state.ac_kickoff_sent:
-            st.session_state.ac_kickoff_sent = True
-            kickoff_text = get_kickoff_message_for_phase("AC")
-            message_text = f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
-            kickoff_msg = make_ai_message(message_text)
-            kickoff_msg.additional_kwargs["phase"] = "AC"
-            st.session_state.messages.append(kickoff_msg)
-            record_message(st.session_state.session_id, "assistant", message_text, "AC", reasoning_summary, api_response_json)
-            try:
-                save_session_transcript_to_drive(st.session_state.session_id)
-            except Exception:
-                pass
-
+        next_phase = "AC"
+        kickoff_flag = "ac_kickoff_sent"
     elif current_phase == "AC":
-        st.session_state.phase = "STRATEGY"
-        st.session_state.messages[0] = SystemMessage(content=get_system_prompt_for_phase("STRATEGY"))
-
-        if not st.session_state.strategy_kickoff_sent:
-            st.session_state.strategy_kickoff_sent = True
-            kickoff_text = get_kickoff_message_for_phase("STRATEGY")
-            message_text = f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
-            kickoff_msg = make_ai_message(message_text)
-            kickoff_msg.additional_kwargs["phase"] = "STRATEGY"
-            st.session_state.messages.append(kickoff_msg)
-            record_message(st.session_state.session_id, "assistant", message_text, "STRATEGY", reasoning_summary, api_response_json)
-            try:
-                save_session_transcript_to_drive(st.session_state.session_id)
-            except Exception:
-                pass
-
+        next_phase = "STRATEGY"
+        kickoff_flag = "strategy_kickoff_sent"
     else:
-        completion_msg = make_ai_message(
-            "You have completed the ABC problem solving plan.\n\nHANDOFF_READY"
-        )
-        completion_msg.additional_kwargs["phase"] = "STRATEGY"
-        st.session_state.messages.append(completion_msg)
-        record_message(st.session_state.session_id, "assistant", "You have completed the ABC problem solving plan.", "STRATEGY", reasoning_summary, api_response_json)
-        try:
-            save_session_transcript_to_drive(st.session_state.session_id)
-        except Exception:
-            pass
+        return "You have completed the ABC problem solving plan.\n\nHANDOFF_READY"
+
+    st.session_state.phase = next_phase
+    st.session_state.messages[0] = SystemMessage(content=get_system_prompt_for_phase(next_phase))
+    if st.session_state[kickoff_flag]:
+        return None
+
+    st.session_state[kickoff_flag] = True
+    kickoff_text = get_kickoff_message_for_phase(next_phase)
+    return f"{clean_text}\n\n{kickoff_text}" if clean_text else kickoff_text
+
 
 def run_llm_and_update_conversation(user_text: str):
-    init_session_for_participant()
+    initialize_session_state()
+    session_id = st.session_state.session_id
+    phase = st.session_state.phase
     user_msg = make_human_message(user_text)
-    user_msg.additional_kwargs["phase"] = st.session_state.phase
+    user_msg.additional_kwargs["phase"] = phase
     st.session_state.messages.append(user_msg)
-    record_message(st.session_state.session_id, "user", user_text, st.session_state.phase)
+    record_message(session_id, "user", user_text, phase)
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY"))
     api_messages = []
     for message in st.session_state.messages:
         if isinstance(message, SystemMessage):
@@ -595,37 +522,49 @@ def run_llm_and_update_conversation(user_text: str):
             continue
         api_messages.append({"role": role, "content": str(message.content)})
 
-    print("DIAGNOSTIC: calling OpenAI Responses API with model gpt-5-mini and detailed reasoning summary")
-    response = client.responses.create(
-        model=MODEL_NAME,
-        input=api_messages,
-        reasoning={"effort": "low", "summary": "auto"},
-    )
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    with OpenAI(api_key=api_key) as client:
+        response = client.responses.create(
+            model=MODEL_NAME,
+            input=api_messages,
+            reasoning={"effort": REASONING_EFFORT, "summary": "auto"},
+            store=False,
+        )
 
-    api_response_json = serialize_api_response(response) if ENABLE_FULL_API_RESPONSE_LOGGING else None
-    print("DIAGNOSTIC: FULL OPENAI RESPONSE JSON")
-    print(json.dumps(response.model_dump(mode="json"), indent=2, ensure_ascii=False) if hasattr(response, "model_dump") else json.dumps(response, indent=2, ensure_ascii=False, default=str))
+    # API-provided summary from the same response that produced the caregiver reply.
+    reasoning_summary = "\n".join(
+        part.text
+        for item in response.output
+        if item.type == "reasoning"
+        for part in (item.summary or [])
+        if part.type == "summary_text"
+    ).strip()
 
-    assistant_text = (getattr(response, "output_text", "") or "").strip()
-    reasoning_summary = extract_reasoning_summary(response)
-
+    assistant_text = (response.output_text or "").strip()
     if not assistant_text:
-        print("DIAGNOSTIC: no assistant output_text found in OpenAI response")
-        raise RuntimeError("GPT-5-mini returned no caregiver-facing text; response was not logged.")
+        raise RuntimeError(f"{MODEL_NAME} returned no caregiver-facing text.")
 
     if "HANDOFF_READY" in assistant_text:
-        clean_text = assistant_text.replace("HANDOFF_READY", "").strip()
-        advance_phase_after_handoff(clean_text, reasoning_summary, api_response_json)
-    else:
-        assistant_msg = make_ai_message(assistant_text)
-        assistant_msg.additional_kwargs["phase"] = st.session_state.phase
-        st.session_state.messages.append(assistant_msg)
-        record_message(st.session_state.session_id, "assistant", assistant_text, st.session_state.phase, reasoning_summary, api_response_json)
+        assistant_text = advance_phase_after_handoff(assistant_text.replace("HANDOFF_READY", "").strip())
 
-    try:
-        save_session_transcript_to_drive(st.session_state.session_id)
-    except Exception:
-        pass
+    backup_executor = get_backup_executor()
+    drive_settings = get_drive_settings()
+    if assistant_text is None:
+        backup_executor.submit(save_session_transcript_to_drive, session_id, drive_settings)
+        return
+
+    posted_phase = st.session_state.phase
+    assistant_msg = make_ai_message(assistant_text)
+    assistant_msg.additional_kwargs["phase"] = posted_phase
+    st.session_state.messages.append(assistant_msg)
+
+    posted_reply = assistant_text.replace("HANDOFF_READY", "").strip()
+    record_message(
+        session_id, "assistant", posted_reply, posted_phase,
+        reasoning_summary=reasoning_summary or None,
+    )
+    backup_executor.submit(save_session_transcript_to_drive, session_id, drive_settings)
+
 
 def upload_excel_to_drive(excel_data, file_name):
     credentials = service_account.Credentials.from_service_account_info(
