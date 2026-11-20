@@ -568,7 +568,8 @@ def run_llm_and_update_conversation(user_text: str):
                 # Final agent completed the ABC plan; no fourth agent exists.
                 assistant_text = (
                     assistant_text.replace("HANDOFF_READY", "").strip()
-                    or "You have completed the ABC problem solving plan."
+                    or "You’ve worked through the ABC problem-solving plan and chosen a strategy to try. "
+                    "You’re welcome to come back with questions or to work through another caregiving situation."
                 )
                 reasoning_summary = extract_reasoning_summary(response)
                 break
