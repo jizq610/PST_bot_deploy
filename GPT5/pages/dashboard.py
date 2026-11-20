@@ -125,7 +125,7 @@ def dashboard_page():
             if role == "assistant":
                 summary = (msg.get("reasoning_summary") or "").strip()
                 if summary:
-                    with st.expander("Reasoning summary", expanded=False):
+                    with st.expander("Reasoning summary", expanded=True):
                         st.write(summary)
                 else:
                     st.caption("No reasoning summary available")
